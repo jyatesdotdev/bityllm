@@ -36,11 +36,65 @@
     footer { color: #274427; font-size: 11px; padding-bottom: 14px; user-select: none; }
     a { color: #3a7a3a; text-decoration: none; }
     a:hover { color: #62c462; text-decoration: underline; }
+    #panel {
+      width: min(920px, 96vw); margin: -8px 0 10px; padding: 10px 22px;
+      background: linear-gradient(#132613, #0d1a0d);
+      border: 1px solid #1d3a1d; border-radius: 0 0 12px 12px;
+      display: flex; justify-content: center; gap: 34px; user-select: none;
+    }
+    .knob { display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; }
+    .dial {
+      width: 34px; height: 34px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #2c4f2c, #101f10 70%);
+      border: 2px solid #1d3a1d; position: relative;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.6), inset 0 1px 2px rgba(120,220,120,0.15);
+      transition: transform 0.15s ease;
+    }
+    .dial::after {
+      content: ""; position: absolute; left: 50%; top: 3px; width: 2px; height: 11px;
+      margin-left: -1px; background: #62c462; border-radius: 1px;
+      box-shadow: 0 0 4px rgba(98,196,98,0.7);
+    }
+    .knob:active .dial { transform: scale(0.92) rotate(var(--rot, 0deg)) !important; }
+    .klabel { font-size: 9px; letter-spacing: 0.12em; color: #3a5f3a; }
+    .kval { font-size: 8px; color: #2c4a2c; min-height: 10px; }
+    .knob .led {
+      position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border-radius: 50%;
+      background: #142614; border: 1px solid #0a140a;
+    }
+    .knob.on .led { background: #62c462; box-shadow: 0 0 6px #62c462; }
+    #crt.off #screen, #crt.off #cursor, #crt.off #ghost { visibility: hidden; }
+    #crt.off { background: #060906; box-shadow: inset 0 0 60px rgba(0,0,0,0.9); }
+    body.nofx #screen { text-shadow: none; }
+    body.nofx #crt { box-shadow: inset 0 0 60px rgba(0,0,0,0.55); }
+    #scan {
+      position: absolute; inset: 0; pointer-events: none; border-radius: 10px;
+      background: repeating-linear-gradient(0deg, rgba(0,0,0,0.16) 0 1px, transparent 1px 3px);
+    }
+    body.nofx #scan { display: none; }
+    #crt { position: relative; }
   </style>
 </head>
 <body>
-  <header>bity — <b>a hallucinated terminal</b> · every byte below is dreamed by a tiny LLM running in your tab · try <b>help</b>, <b>ping bity.dev</b>, <b>fortune</b>, <b>reboot</b> · ↑ history · Tab complete · → accept the model's suggestion</header>
-  <div id="crt"><pre id="screen"><span id="text"></span><span id="cursor"></span><span id="ghost"></span></pre></div>
+  <header>bity — <b>a hallucinated terminal</b> · every byte below is dreamed by a tiny LLM running in your tab · try <b>help</b>, <b>ping bity.dev</b>, <b>fortune</b>, <b>reboot</b> · ↑ history · Tab complete · knobs below the tube</header>
+  <div id="crt"><div id="scan"></div><pre id="screen"><span id="text"></span><span id="cursor"></span><span id="ghost"></span></pre></div>
+  <div id="panel">
+    <div class="knob" id="k-power" title="power — turns the tube off; back on cold-boots the dream">
+      <div class="dial"><span class="led"></span></div><span class="klabel">POWER</span><span class="kval"></span>
+    </div>
+    <div class="knob" id="k-suggest" title="the model dreams your next keystrokes (→ to accept)">
+      <div class="dial"><span class="led"></span></div><span class="klabel">SUGGEST</span><span class="kval"></span>
+    </div>
+    <div class="knob" id="k-temp" title="sampling temperature — how feverish the dream runs">
+      <div class="dial"></div><span class="klabel">TEMP</span><span class="kval"></span>
+    </div>
+    <div class="knob" id="k-baud" title="output pacing">
+      <div class="dial"></div><span class="klabel">BAUD</span><span class="kval"></span>
+    </div>
+    <div class="knob" id="k-fx" title="scanlines + phosphor glow">
+      <div class="dial"><span class="led"></span></div><span class="klabel">CRT FX</span><span class="kval"></span>
+    </div>
+  </div>
   <footer>bityllm · pure TypeScript · zero dependencies · trained from scratch on a single Mac · <a href="https://github.com/jyatesdotdev/bityllm" target="_blank" rel="noopener">source &amp; story on GitHub</a></footer>
   <script type="module" src="./dist/examples/web/terminal.js"></script>
 </body>

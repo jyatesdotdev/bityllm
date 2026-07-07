@@ -48,6 +48,9 @@ export class Shell {
   readonly session: SessionLike;
   readonly prompt: string;
   readonly registry = new Map<string, Binary>();
+  /** front-panel overrides (null/"stock" = per-binary settings) */
+  tempOverride: number | null = null;
+  pacingMode: "stock" | "turbo" | "slow" = "stock";
   private seedCounter: number;
 
   constructor(session: SessionLike, opts: { prompt: string; seed?: number }) {
@@ -85,13 +88,19 @@ export class Shell {
     const stop = this.prompt;
     const opts = {
       maxNewTokens: bin?.maxNewTokens ?? 512,
-      temperature: bin?.sampling?.temperature ?? 0.7,
+      temperature: this.tempOverride ?? bin?.sampling?.temperature ?? 0.7,
       topK: bin?.sampling?.topK ?? 40,
       stop: [stop],
       seed: this.seedCounter++,
     };
-    const charDelay = bin?.pacing?.charDelayMs ?? 2;
-    const lineDelay = bin?.pacing?.lineDelayMs ?? 0;
+    let charDelay = bin?.pacing?.charDelayMs ?? 2;
+    let lineDelay = bin?.pacing?.lineDelayMs ?? 0;
+    if (this.pacingMode === "turbo") {
+      charDelay = 0;
+      lineDelay = 0;
+    } else if (this.pacingMode === "slow") {
+      charDelay = 8; // ~1200 baud
+    }
 
     // Hold back exactly stop.length chars: the stream ends the moment the stop
     // string is fully emitted, so the stop can only ever be the buffer's tail —

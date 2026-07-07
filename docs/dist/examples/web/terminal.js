@@ -83,6 +83,8 @@ async function main() {
     const commandNames = [...shell.registry.keys()].sort();
     let line = "";
     let busy = false;
+    let powered = true;
+    let suggestOn = false; // SUGGEST knob — off by default (it's a young circuit)
     const history = [];
     let histIdx = 0;
     let savedLine = "";
@@ -96,7 +98,7 @@ async function main() {
     };
     const computeGhost = () => {
         const gen = ++suggestGen;
-        if (busy || line.length === 0)
+        if (!suggestOn || !powered || busy || line.length === 0)
             return;
         if (session.length + line.length + 56 >= model.cfg.blockSize)
             return; // rewind hazard
@@ -133,8 +135,82 @@ async function main() {
         scheduleGhost();
     };
     io.write(PROMPT);
+    const knob = (id, positions, start, persist) => {
+        const el = document.getElementById(id);
+        const dial = el.querySelector(".dial");
+        const val = el.querySelector(".kval");
+        let idx = start;
+        if (persist) {
+            const saved = parseInt(localStorage.getItem(persist) ?? "", 10);
+            if (saved >= 0 && saved < positions.length)
+                idx = saved;
+        }
+        const render = () => {
+            const pos = positions[idx];
+            dial.style.setProperty("--rot", `${pos.rot}deg`);
+            dial.style.transform = `rotate(${pos.rot}deg)`;
+            val.textContent = pos.label;
+            el.classList.toggle("on", !!pos.led);
+            pos.apply();
+        };
+        el.addEventListener("click", () => {
+            idx = (idx + 1) % positions.length;
+            if (persist)
+                localStorage.setItem(persist, String(idx));
+            render();
+        });
+        render();
+    };
+    let everBooted = false;
+    knob("k-power", [
+        {
+            label: "ON", rot: 30, led: true,
+            apply: () => {
+                crt.classList.remove("off");
+                powered = true;
+                if (everBooted) {
+                    // cold boot: the dream forgets
+                    suggestGen++;
+                    setGhost("");
+                    line = "";
+                    io.clear();
+                    session.reset();
+                    session.feed(PROMPT);
+                    io.write("bity login: guest\n\n" + PROMPT);
+                }
+                everBooted = true;
+            },
+        },
+        {
+            label: "OFF", rot: -30,
+            apply: () => {
+                powered = false;
+                suggestGen++;
+                setGhost("");
+                crt.classList.add("off");
+            },
+        },
+    ], 0);
+    knob("k-suggest", [
+        { label: "OFF", rot: -30, apply: () => { suggestOn = false; suggestGen++; setGhost(""); } },
+        { label: "ON", rot: 30, led: true, apply: () => { suggestOn = true; } },
+    ], 0, "bity.suggest");
+    knob("k-temp", [
+        { label: "CHILL", rot: -40, apply: () => { shell.tempOverride = 0.45; } },
+        { label: "STOCK", rot: 0, apply: () => { shell.tempOverride = null; } },
+        { label: "FEVER", rot: 40, apply: () => { shell.tempOverride = 1.15; } },
+    ], 1, "bity.temp");
+    knob("k-baud", [
+        { label: "1200", rot: -40, apply: () => { shell.pacingMode = "slow"; } },
+        { label: "9600", rot: 0, apply: () => { shell.pacingMode = "stock"; } },
+        { label: "TURBO", rot: 40, apply: () => { shell.pacingMode = "turbo"; } },
+    ], 1, "bity.baud");
+    knob("k-fx", [
+        { label: "ON", rot: 30, led: true, apply: () => document.body.classList.remove("nofx") },
+        { label: "OFF", rot: -30, apply: () => document.body.classList.add("nofx") },
+    ], 0, "bity.fx");
     document.addEventListener("keydown", async (e) => {
-        if (busy || e.metaKey || e.ctrlKey || e.altKey)
+        if (!powered || busy || e.metaKey || e.ctrlKey || e.altKey)
             return;
         if (e.key === "Enter") {
             e.preventDefault();
