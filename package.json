@@ -14,7 +14,7 @@
     "generate": "node examples/generate.ts",
     "export": "node examples/export-int8.ts",
     "web": "tsc -p tsconfig.web.json && node examples/web/serve.mjs",
-    "pages": "tsc -p tsconfig.web.json && rm -rf docs && mkdir -p docs && cp examples/web/index.html docs/ && cp -R examples/web/dist docs/dist && cp models/terminal.int8.bity docs/terminal.int8.bity"
+    "pages": "tsc -p tsconfig.web.json && rm -rf docs && mkdir -p docs && cp examples/web/index.html docs/ && cp -R examples/web/dist docs/dist && cp models/terminal.int8.bity docs/terminal.int8.bity && cp examples/web/bity.svg docs/bity.svg"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

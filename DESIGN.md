@@ -2,7 +2,7 @@
 
 > A tiny GPT you **train from scratch** in **pure TypeScript** with **zero runtime dependencies**, that ships to the **browser** for **cheap, streaming inference** — powering a **virtual terminal** whose "binaries" (`ping`, `reboot`, `fortune`, …) are hallucinated by the model.
 
-Status: **Draft v3** · Train: Node ≥ 22 (dev on v26) · Run: modern browsers (and Node) · License: TBD
+Status: **Draft v3** · Train: Node ≥ 22 (dev on v26) · Run: modern browsers (and Node) · License: MIT
 
 ---
 

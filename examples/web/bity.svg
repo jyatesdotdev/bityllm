@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>bity — a terminal dreaming of a flower</title>
+  <desc>A green-phosphor CRT with a blinking cursor, dreaming of the flower it was asked to mkdir.</desc>
+
+  <rect width="256" height="256" rx="52" fill="#0a0f0a"/>
+
+  <!-- CRT body -->
+  <rect x="30" y="84" width="148" height="112" rx="14" fill="#16301b" stroke="#2a5f2a" stroke-width="3"/>
+  <!-- screen -->
+  <rect x="42" y="96" width="124" height="84" rx="6" fill="#050d05"/>
+  <!-- scanlines -->
+  <g fill="#62c462" opacity="0.08">
+    <rect x="42" y="104" width="124" height="2"/>
+    <rect x="42" y="116" width="124" height="2"/>
+    <rect x="42" y="128" width="124" height="2"/>
+    <rect x="42" y="140" width="124" height="2"/>
+    <rect x="42" y="152" width="124" height="2"/>
+    <rect x="42" y="164" width="124" height="2"/>
+  </g>
+  <!-- prompt + blinking cursor -->
+  <text x="54" y="148" font-family="Menlo, Consolas, monospace" font-size="30" font-weight="bold" fill="#62c462">&gt;</text>
+  <rect x="78" y="122" width="15" height="27" fill="#62c462">
+    <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.5;0.5;0.95;1" dur="1.2s" repeatCount="indefinite"/>
+  </rect>
+  <!-- stand -->
+  <rect x="92" y="196" width="24" height="9" fill="#16301b"/>
+  <rect x="72" y="205" width="64" height="9" rx="4.5" fill="#16301b" stroke="#2a5f2a" stroke-width="2"/>
+
+  <!-- thought bubbles rising -->
+  <circle cx="180" cy="90" r="5" fill="#16301b" stroke="#2a5f2a" stroke-width="2"/>
+  <circle cx="192" cy="72" r="7.5" fill="#16301b" stroke="#2a5f2a" stroke-width="2"/>
+
+  <!-- dream cloud -->
+  <g stroke="#2a5f2a" stroke-width="2.5" fill="#16301b">
+    <circle cx="205" cy="48" r="14"/>
+    <circle cx="222" cy="39" r="16"/>
+    <circle cx="238" cy="49" r="13"/>
+    <circle cx="228" cy="58" r="13"/>
+    <circle cx="209" cy="58" r="12"/>
+  </g>
+  <g fill="#16301b">
+    <circle cx="205" cy="48" r="14"/>
+    <circle cx="222" cy="39" r="16"/>
+    <circle cx="238" cy="49" r="13"/>
+    <circle cx="228" cy="58" r="13"/>
+    <circle cx="209" cy="58" r="12"/>
+  </g>
+
+  <!-- the flower it was asked to mkdir -->
+  <g>
+    <circle cx="222" cy="40" r="4.6" fill="#d98fd9"/>
+    <circle cx="215" cy="45" r="4.6" fill="#d98fd9"/>
+    <circle cx="218" cy="53" r="4.6" fill="#d98fd9"/>
+    <circle cx="226" cy="53" r="4.6" fill="#d98fd9"/>
+    <circle cx="229" cy="45" r="4.6" fill="#d98fd9"/>
+    <circle cx="222" cy="47" r="3.4" fill="#e8c95a"/>
+  </g>
+</svg>

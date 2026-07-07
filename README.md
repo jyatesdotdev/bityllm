@@ -1,3 +1,5 @@
+<p align="center"><img src="examples/web/bity.svg" width="170" alt="bity — a terminal dreaming of a flower"/></p>
+
 # bityllm
 
 A tiny GPT trained **from scratch** in **pure TypeScript** with **zero runtime
@@ -43,4 +45,4 @@ deno run --allow-read --allow-write examples/train-terminal-gpu.ts \
   --steps 16000 --batch 32 --layers 6 --heads 6 --dim 384 --out models/mine.bity
 ```
 
-*License: not yet chosen — all rights reserved for now.*
+*License: [MIT](LICENSE).*
