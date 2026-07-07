@@ -59,9 +59,9 @@ export const BINARIES = [
         synopsis: "reboot — restart the dream",
         rewrite: () => "sudo reboot",
         run: async (_argv, ctx) => {
-            const { io, session, prompt } = ctx;
+            const { io, session } = ctx;
             let streamed = 0;
-            for await (const ch of session.stream({ maxNewTokens: 380, temperature: 0.6, topK: 30, stop: [prompt, "login: "] })) {
+            for await (const ch of session.stream({ maxNewTokens: 380, temperature: 0.6, topK: 30, stop: [...ctx.shell.promptStops, "login: "] })) {
                 io.write(ch);
                 streamed++;
                 if (ch === "\n")

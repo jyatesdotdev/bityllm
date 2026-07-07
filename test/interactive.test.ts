@@ -169,3 +169,51 @@ test("Shell static prompt stays static (cd still navigates silently)", async () 
   assert.equal(shell.prompt, "$ "); // non-templated prompt unchanged
   assert.equal(seen.length, 0);     // cd is a builtin: the model is never consulted
 });
+
+// A fake session that honors opts.stop exactly like the real InferenceSession,
+// so we can drive the shell's next-prompt detection deterministically.
+function stoppingSession(reply: string): SessionLike {
+  return {
+    feed: () => {},
+    reset: () => {},
+    length: 0,
+    snapshot: () => ({ t: 0, c: 0 }),
+    restore: () => {},
+    *stream(opts: StreamOpts) {
+      let out = "";
+      const maxStop = Math.max(0, ...(opts.stop ?? []).map((s) => s.length));
+      for (const ch of reply) {
+        out += ch;
+        if (out.length > maxStop * 4) out = out.slice(-maxStop * 2);
+        yield ch;
+        if (opts.stop?.some((s) => s.length && out.endsWith(s))) return;
+      }
+    },
+  };
+}
+
+test("cat-after-cd stops at the next prompt even when the model dreams a different path", async () => {
+  // in ~/projects the real prompt is guest@bity:~/projects$, but the model emits
+  // the far-more-common HOME prompt after the output — the exact-prompt stop
+  // would miss it and overrun into the extra hallucinated commands.
+  const reply = "README.md  src\nguest@bity:~$ ls\nnotes.txt\nguest@bity:~$ ";
+  const shell = new Shell(stoppingSession(reply), { prompt: "guest@bity:~$ ", seed: 1 });
+  shell.register({ name: "cat", kind: "model" });
+
+  await shell.run("cd projects", countingIO().io);
+  assert.equal(shell.prompt, "guest@bity:~/projects$ ");
+
+  const { io, screen } = countingIO();
+  await shell.run("cat README.md", io);
+  assert.ok(screen().includes("README.md  src"), "shows the actual command output");
+  assert.ok(!screen().includes("notes.txt"), "must NOT run the model's extra hallucinated commands");
+  assert.ok(!screen().includes("guest@bity:"), "must not leak any prompt text");
+});
+
+test("promptStops: exact prompt + persona prefix (dynamic); static prompt has just itself", () => {
+  const dyn = new Shell(stoppingSession(""), { prompt: "guest@bity:~$ ", seed: 1 });
+  dyn.cwd = "~/deep/path";
+  assert.deepEqual(dyn.promptStops, ["guest@bity:~/deep/path$ ", "guest@bity:"]);
+  const stat = new Shell(stoppingSession(""), { prompt: "$ ", seed: 1 });
+  assert.deepEqual(stat.promptStops, ["$ "]);
+});

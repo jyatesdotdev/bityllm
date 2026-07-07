@@ -71,6 +71,15 @@ export class Shell {
     return this.promptPrefix ? `${this.promptPrefix}:${this.cwd}$ ` : this.staticPrompt;
   }
 
+  /** Stop-sequences marking the model starting a new prompt: the exact current
+   *  prompt AND the persona prefix ("guest@bity:"). The model frequently emits
+   *  a different path than the real cwd (deep/rare paths especially), so the
+   *  invariant prefix is what actually stops generation — without it, cat-after-cd
+   *  overruns into a cascade of hallucinated commands. */
+  get promptStops(): string[] {
+    return this.promptPrefix ? [this.prompt, `${this.promptPrefix}:`] : [this.prompt];
+  }
+
   /** cd builtin: pure string logic over a dreamed filesystem — no validation */
   private applyCd(arg: string | undefined): void {
     if (!arg || arg === "~" || arg === "$HOME") this.cwd = "~";
@@ -110,14 +119,16 @@ export class Shell {
     this.session.feed(this.prompt); // the shell's next prompt is model context too
   }
 
-  /** Stream model output with pacing, holding back a possible stop-sequence. */
+  /** Stream model output with pacing, holding back a possible next-prompt. */
   private async streamModel(bin: Binary | undefined, io: ShellIO): Promise<void> {
-    const stop = this.prompt;
+    const stops = this.promptStops;
+    const guard = this.prompt.length; // longest stop → safe holdback window
+    const cutMark = this.promptPrefix ? `${this.promptPrefix}:` : this.prompt;
     const opts = {
       maxNewTokens: bin?.maxNewTokens ?? 512,
       temperature: this.tempOverride ?? bin?.sampling?.temperature ?? 0.7,
       topK: bin?.sampling?.topK ?? 40,
-      stop: [stop],
+      stop: stops,
       seed: this.seedCounter++,
     };
     let charDelay = bin?.pacing?.charDelayMs ?? 2;
@@ -129,13 +140,13 @@ export class Shell {
       charDelay = 8; // ~1200 baud
     }
 
-    // Hold back exactly stop.length chars: the stream ends the moment the stop
-    // string is fully emitted, so the stop can only ever be the buffer's tail —
-    // strip it there and nothing of the model's own prompt is displayed.
+    // Hold back up to `guard` chars: the stream ends the moment a stop appears,
+    // so any next-prompt lives in the buffer's tail — cut from the persona
+    // prefix onward and nothing of the model's own prompt is displayed.
     let buf = "";
     for await (const ch of this.session.stream(opts)) {
       buf += ch;
-      while (buf.length > stop.length) {
+      while (buf.length > guard) {
         const flush = buf[0];
         buf = buf.slice(1);
         io.write(flush);
@@ -143,8 +154,8 @@ export class Shell {
         if (flush === "\n" && lineDelay > 0) await io.delay(lineDelay);
       }
     }
-    if (buf.endsWith(stop)) buf = buf.slice(0, -stop.length);
-    io.write(buf);
+    const cut = buf.lastIndexOf(cutMark);
+    io.write(cut >= 0 ? buf.slice(0, cut) : buf);
   }
 }
 
