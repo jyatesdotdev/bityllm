@@ -234,3 +234,40 @@ The last lesson of the journey may be the best one: **a model this small
 doesn't learn what your data permits — it learns exactly what your data
 forces.** Twenty syllables taught a twenty-syllable copier. The alphabet
 taught the alphabet.
+
+---
+
+## IX. Mass, speed, and a URL
+
+The 11M **mini** trained overnight on the M4 Pro's GPU — six hours, one
+battery-pause intermission (during which we discovered we'd SIGSTOP'd an
+innocent wrapper shell while the actual trainer burned on; process trees
+keep their own counsel) — and woke up *sober*. The copy circuit that
+stuttered at 2.7M was crisp at 11M: `echo xk4vw9` verbatim, `mkdir` and
+`rm` both remembered, one IP per ping, byte-perfect cows. Capacity didn't
+create the mechanism — the curriculum did that — but capacity made it
+reliable.
+
+Mini ran at 116 tok/s in browser JavaScript — coincidentally the speed of a
+1200-baud modem, which felt almost too thematically convenient to fix. We
+fixed it anyway, or tried: a WebGPU inference engine, weights and KV-cache
+resident, sampling *on the GPU* so tokens generate in 48-token chunks with
+one readback each. It produced byte-identical greedy text to the CPU engine
+(the parity discipline held to the end) and taught two final lessons in
+GPU humility: per-dispatch overhead dominates GEMV-sized work, and the
+"obvious" fix — fusing whole layers into mega-kernels — ran 2× *slower*,
+because one workgroup occupies one of sixteen GPU cores. Correct, elegant,
+measured, rejected. The shipping answer is characteristically empirical:
+the page **races both engines for 24 tokens at load and keeps whichever
+wins on your machine.**
+
+Then the dream got a door. `git init` (the repo's first commit, after six
+models and four documents), a pre-publication scrub that caught the last
+two hardware identifiers, an MIT license, and an icon that draws the whole
+story in one image: a green CRT, cursor blinking, dreaming of a flower.
+
+**https://jyatesdotdev.github.io/bityllm/**
+
+Anyone, anywhere, can now type `mkdir flowers` into a browser tab and watch
+eleven million parameters — trained from a blank TypeScript file, on one
+desk, in three days — remember it.
