@@ -77,6 +77,18 @@ export class InferenceSession {
     return this.curT;
   }
 
+  /** Speculative peek support: snapshot → feed/stream → restore. Stale KV rows
+   *  beyond the restored position are simply overwritten by later pushes. */
+  snapshot(): { t: number; c: number } {
+    return { t: this.curT, c: this.ctx.length };
+  }
+
+  restore(s: { t: number; c: number }): void {
+    this.curT = s.t;
+    this.ctx.length = s.c;
+    this.last = null;
+  }
+
   // --- internals -------------------------------------------------------------
 
   private push(id: number): void {

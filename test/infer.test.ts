@@ -75,6 +75,27 @@ test("int8 checkpoint: ~4× smaller, logits close after dequant", () => {
   assert.ok(maxDiff < 0.35, `int8 logit drift too large: ${maxDiff}`);
 });
 
+test("speculative peek: snapshot → feed → restore leaves no trace (ghost suggestions)", () => {
+  const model = new GPT(cfg, new RNG(17));
+  const tok = new CharTokenizer(VOCAB);
+
+  const a = new InferenceSession(model, tok);
+  a.feed("hello wor");
+  const snap = a.snapshot();
+  a.feed("XYZ zebra quokka"); // speculative peek pollutes the cache...
+  a.restore(snap);            // ...rollback
+  a.feed("ld");               // stale rows must be overwritten identically
+
+  const b = new InferenceSession(model, tok);
+  b.feed("hello world");
+
+  // @ts-expect-error private access: compare final logits bitwise
+  const la: Float32Array = a.last;
+  // @ts-expect-error private access
+  const lb: Float32Array = b.last;
+  assert.deepEqual([...la], [...lb]);
+});
+
 test("shell: stop-sequence is never displayed, prompt context is fed", async () => {
   const model = new GPT(cfg, new RNG(31));
   const tok = new CharTokenizer(VOCAB);

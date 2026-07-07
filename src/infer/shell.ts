@@ -12,6 +12,9 @@ export interface SessionLike {
   stream(opts: StreamOpts): Generator<string> | AsyncGenerator<string>;
   reset(): void;
   readonly length: number;
+  /** speculative peek: save/restore cache position (ghost suggestions) */
+  snapshot(): { t: number; c: number };
+  restore(s: { t: number; c: number }): void;
 }
 
 export interface ShellIO {

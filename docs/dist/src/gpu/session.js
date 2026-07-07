@@ -171,6 +171,16 @@ export class GPUInferenceSession {
     get length() {
         return this.curT;
     }
+    /** Speculative peek support (see CPU session): stale KV rows are overwritten. */
+    snapshot() {
+        return { t: this.curT, c: this.ctx.length };
+    }
+    restore(s) {
+        this.curT = s.t;
+        this.ctx.length = s.c;
+        this.last = null;
+        this.dirty = true;
+    }
     /** Synchronous: submits GPU work per token; logits are read lazily in stream(). */
     feed(text) {
         for (const id of this.tok.encode(text))
