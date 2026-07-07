@@ -1,11 +1,12 @@
 // The bity virtual terminal (DESIGN §2, M5): loads the int8 checkpoint, wires
 // the Shell + binaries to a DOM screen, and lets you type into the dream.
 //
-// Niceties: bash-style history (↑/↓), Tab-completion of command names, and
-// fish-style ghost autosuggestions — dreamed by the model itself via a
-// speculative KV-cache peek (snapshot → feed → stream → restore).
+// Interactive niceties: bash-style history (↑/↓), Tab-completion, and
+// fish-style ghost autosuggestions dreamed by the model via a speculative
+// KV-cache peek (snapshot → feed → stream → restore). Completion/history
+// logic lives in src/infer/shell.ts and is unit-tested; this file is DOM glue.
 
-import { deserialize, InferenceSession, GPUInferenceSession, Shell, BINARIES } from "../../src/infer.ts";
+import { deserialize, InferenceSession, GPUInferenceSession, Shell, BINARIES, completeCommand, History } from "../../src/infer.ts";
 import type { ShellIO, SessionLike } from "../../src/infer.ts";
 
 const PROMPT = "guest@bity:~$ ";
@@ -50,8 +51,7 @@ async function main(): Promise<void> {
   const bytes = new Uint8Array(await res.arrayBuffer());
   const { model, tok, step } = deserialize(bytes);
 
-  // engine selection: race WebGPU vs CPU for 24 tokens, keep the winner —
-  // dispatch overhead varies wildly across browsers/GPUs, so measure, don't guess
+  // engine selection: race WebGPU vs CPU for 24 tokens, keep the winner
   const race = async (s: SessionLike): Promise<number> => {
     s.feed("guest@bity:~$ ls\n");
     const t0 = performance.now();
@@ -86,19 +86,18 @@ async function main(): Promise<void> {
   const shell = new Shell(session, { prompt: PROMPT });
   shell.register(...BINARIES);
   const commandNames = [...shell.registry.keys()].sort();
+  const history = new History();
 
   let line = "";
   let busy = false;
   let powered = true;
   let suggestOn = false; // SUGGEST knob — off by default (it's a young circuit)
-  const history: string[] = [];
-  let histIdx = 0;
-  let savedLine = "";
 
   // ---- ghost autosuggestions: the model dreams your next keystrokes ----
   let ghostText = "";
   let suggestGen = 0;
   let suggestTimer: ReturnType<typeof setTimeout> | undefined;
+  let peekInFlight = false;
 
   const setGhost = (s: string): void => {
     ghostText = s;
@@ -106,31 +105,48 @@ async function main(): Promise<void> {
   };
 
   const computeGhost = (): void => {
-    const gen = ++suggestGen;
     if (!suggestOn || !powered || busy || line.length === 0) return;
-    if (session.length + line.length + 56 >= model.cfg.blockSize) return; // rewind hazard
+    if (peekInFlight) return; // the in-flight peek re-checks freshness when done
+    if (session.length + line.length + 40 >= model.cfg.blockSize) return; // rewind hazard
+    const gen = ++suggestGen;
+    const forLine = line;
+    peekInFlight = true;
     void withLock(async () => {
-      if (gen !== suggestGen || busy) return;
-      const snap = session.snapshot();
       try {
-        session.feed(line);
-        let out = "";
-        for await (const ch of session.stream({ maxNewTokens: 36, temperature: 0.2, topK: 3, stop: ["\n"], seed: 2 })) {
-          out += ch;
-          if (gen !== suggestGen) break;
+        if (gen !== suggestGen || busy || !powered) return;
+        const snap = session.snapshot();
+        try {
+          session.feed(forLine);
+          let out = "";
+          let i = 0;
+          for await (const ch of session.stream({ maxNewTokens: 24, temperature: 0.2, topK: 3, stop: ["\n"], seed: 2 })) {
+            out += ch;
+            // macrotask yield every few tokens: CPU-engine steps are synchronous
+            // and would otherwise starve keyboard events (typing jank)
+            if (++i % 4 === 0) await new Promise((r) => setTimeout(r));
+            if (gen !== suggestGen) break;
+          }
+          out = out.split("\n")[0];
+          if (gen === suggestGen && !busy && powered && out.length > 0) setGhost(out);
+        } finally {
+          session.restore(snap);
         }
-        out = out.split("\n")[0];
-        if (gen === suggestGen && !busy && out.length > 0) setGhost(out);
       } finally {
-        session.restore(snap);
+        peekInFlight = false;
+        // typed more while we were dreaming? dream again for the fresh prefix
+        if (gen !== suggestGen && suggestOn && powered && !busy && line.length > 0) {
+          clearTimeout(suggestTimer);
+          suggestTimer = setTimeout(computeGhost, 60);
+        }
       }
     });
   };
 
   const scheduleGhost = (): void => {
     setGhost("");
+    suggestGen++;
     clearTimeout(suggestTimer);
-    suggestTimer = setTimeout(computeGhost, 220);
+    if (suggestOn) suggestTimer = setTimeout(computeGhost, 220);
   };
 
   const replaceLine = (nl: string): void => {
@@ -177,14 +193,17 @@ async function main(): Promise<void> {
         crt.classList.remove("off");
         powered = true;
         if (everBooted) {
-          // cold boot: the dream forgets
-          suggestGen++;
-          setGhost("");
-          line = "";
-          io.clear();
-          session.reset();
-          session.feed(PROMPT);
-          io.write("bity login: guest\n\n" + PROMPT);
+          // cold boot QUEUED behind any running command — never reset a
+          // session mid-stream
+          void withLock(async () => {
+            suggestGen++;
+            setGhost("");
+            line = "";
+            io.clear();
+            session.reset();
+            session.feed(PROMPT);
+            io.write("bity login: guest\n\n" + PROMPT);
+          });
         }
         everBooted = true;
       },
@@ -202,7 +221,7 @@ async function main(): Promise<void> {
 
   knob("k-suggest", [
     { label: "OFF", rot: -30, apply: () => { suggestOn = false; suggestGen++; setGhost(""); } },
-    { label: "ON", rot: 30, led: true, apply: () => { suggestOn = true; } },
+    { label: "ON", rot: 30, led: true, apply: () => { suggestOn = true; scheduleGhost(); } },
   ], 0, "bity.suggest");
 
   knob("k-temp", [
@@ -231,11 +250,7 @@ async function main(): Promise<void> {
       setGhost("");
       io.write("\n");
       const cmd = line;
-      if (cmd.trim()) {
-        history.push(cmd);
-      }
-      histIdx = history.length;
-      savedLine = "";
+      history.push(cmd);
       line = "";
       busy = true;
       try {
@@ -254,19 +269,9 @@ async function main(): Promise<void> {
       }
     } else if (e.key === "Tab") {
       e.preventDefault();
-      if (line.length > 0 && !line.includes(" ")) {
-        const matches = commandNames.filter((n) => n.startsWith(line));
-        if (matches.length === 1) replaceLine(matches[0] + " ");
-        else if (matches.length > 1) {
-          // longest common prefix; if no progress, show the candidates
-          let p = matches[0];
-          for (const m of matches) while (!m.startsWith(p)) p = p.slice(0, -1);
-          if (p.length > line.length) replaceLine(p);
-          else {
-            io.write("\n" + matches.join("  ") + "\n" + PROMPT + line);
-          }
-        }
-      }
+      const c = completeCommand(line, commandNames);
+      if (c.kind === "complete" || c.kind === "extend") replaceLine(c.text);
+      else if (c.kind === "list") io.write("\n" + c.options.join("  ") + "\n" + PROMPT + line);
     } else if (e.key === "ArrowRight" || e.key === "End") {
       if (ghostText) {
         e.preventDefault();
@@ -277,17 +282,12 @@ async function main(): Promise<void> {
       }
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      if (histIdx > 0) {
-        if (histIdx === history.length) savedLine = line;
-        histIdx--;
-        replaceLine(history[histIdx]);
-      }
+      const h = history.up(line);
+      if (h !== null) replaceLine(h);
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      if (histIdx < history.length) {
-        histIdx++;
-        replaceLine(histIdx === history.length ? savedLine : history[histIdx]);
-      }
+      const h = history.down();
+      if (h !== null) replaceLine(h);
     } else if (e.key === "Escape") {
       suggestGen++;
       setGhost("");

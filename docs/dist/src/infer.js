@@ -3,6 +3,7 @@
 export { InferenceSession } from "./infer/session.js";
 export { GPUInferenceSession } from "./gpu/session.js";
 export { Shell } from "./infer/shell.js";
+export { completeCommand, History } from "./infer/shell.js";
 export { BINARIES } from "./infer/binaries.js";
 export { sampleLogits } from "./infer/sampler.js";
 export { deserialize } from "./io/checkpoint.js";

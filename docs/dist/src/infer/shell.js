@@ -77,3 +77,48 @@ export class Shell {
         io.write(buf);
     }
 }
+/** Tab-completion over registered command names (first word only). */
+export function completeCommand(line, names) {
+    if (line.length === 0 || line.includes(" "))
+        return { kind: "none", text: "", options: [] };
+    const matches = names.filter((n) => n.startsWith(line)).sort();
+    if (matches.length === 0)
+        return { kind: "none", text: "", options: [] };
+    if (matches.length === 1)
+        return { kind: "complete", text: matches[0] + " ", options: matches };
+    let p = matches[0];
+    for (const m of matches) {
+        while (!m.startsWith(p))
+            p = p.slice(0, -1);
+    }
+    if (p.length > line.length)
+        return { kind: "extend", text: p, options: matches };
+    return { kind: "list", text: "", options: matches };
+}
+/** Bash-style history cursor: up/down navigation with a saved in-progress line. */
+export class History {
+    items = [];
+    idx = 0;
+    saved = "";
+    push(line) {
+        if (line.trim())
+            this.items.push(line);
+        this.idx = this.items.length;
+        this.saved = "";
+    }
+    /** returns the line to display, or null if navigation hit an edge */
+    up(current) {
+        if (this.idx === 0)
+            return null;
+        if (this.idx === this.items.length)
+            this.saved = current;
+        this.idx--;
+        return this.items[this.idx];
+    }
+    down() {
+        if (this.idx >= this.items.length)
+            return null;
+        this.idx++;
+        return this.idx === this.items.length ? this.saved : this.items[this.idx];
+    }
+}
