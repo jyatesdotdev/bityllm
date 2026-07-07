@@ -156,7 +156,7 @@ async function main(): Promise<void> {
     scheduleGhost();
   };
 
-  io.write(PROMPT);
+  io.write(shell.prompt);
 
   // ---- the front panel: little retro knobs under the tube ----
   interface KnobPos { label: string; rot: number; led?: boolean; apply: () => void; }
@@ -201,8 +201,9 @@ async function main(): Promise<void> {
             line = "";
             io.clear();
             session.reset();
-            session.feed(PROMPT);
-            io.write("bity login: guest\n\n" + PROMPT);
+            shell.cwd = "~";
+            session.feed(shell.prompt);
+            io.write("bity login: guest\n\n" + shell.prompt);
           });
         }
         everBooted = true;
@@ -259,7 +260,7 @@ async function main(): Promise<void> {
         io.write(`\n[bity kernel panic: ${err instanceof Error ? err.message : String(err)}]\n`);
       }
       busy = false;
-      io.write(PROMPT);
+      io.write(shell.prompt);
     } else if (e.key === "Backspace") {
       e.preventDefault();
       if (line.length > 0) {
@@ -271,7 +272,7 @@ async function main(): Promise<void> {
       e.preventDefault();
       const c = completeCommand(line, commandNames);
       if (c.kind === "complete" || c.kind === "extend") replaceLine(c.text);
-      else if (c.kind === "list") io.write("\n" + c.options.join("  ") + "\n" + PROMPT + line);
+      else if (c.kind === "list") io.write("\n" + c.options.join("  ") + "\n" + shell.prompt + line);
     } else if (e.key === "ArrowRight" || e.key === "End") {
       if (ghostText) {
         e.preventDefault();

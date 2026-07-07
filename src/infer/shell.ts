@@ -27,6 +27,7 @@ export interface ShellContext {
   io: ShellIO;
   session: SessionLike;
   prompt: string;
+  shell: Shell;
 }
 
 export interface Binary {
@@ -46,18 +47,37 @@ export interface Binary {
 
 export class Shell {
   readonly session: SessionLike;
-  readonly prompt: string;
   readonly registry = new Map<string, Binary>();
   /** front-panel overrides (null/"stock" = per-binary settings) */
   tempOverride: number | null = null;
   pacingMode: "stock" | "turbo" | "slow" = "stock";
+  /** current directory — the prompt carries it (v7); cd is a shell builtin */
+  cwd = "~";
+  private readonly promptPrefix: string | null;
+  private readonly staticPrompt: string;
   private seedCounter: number;
 
   constructor(session: SessionLike, opts: { prompt: string; seed?: number }) {
     this.session = session;
-    this.prompt = opts.prompt;
+    // prompts shaped "<prefix>:~$ " become location-aware; anything else is static
+    const m = opts.prompt.match(/^(.+):~\$ $/);
+    this.promptPrefix = m ? m[1] : null;
+    this.staticPrompt = opts.prompt;
     this.seedCounter = opts.seed ?? (Date.now() & 0xffff);
     session.feed(this.prompt); // prime the context with the first prompt
+  }
+
+  get prompt(): string {
+    return this.promptPrefix ? `${this.promptPrefix}:${this.cwd}$ ` : this.staticPrompt;
+  }
+
+  /** cd builtin: pure string logic over a dreamed filesystem — no validation */
+  private applyCd(arg: string | undefined): void {
+    if (!arg || arg === "~" || arg === "$HOME") this.cwd = "~";
+    else if (arg === "..") this.cwd = this.cwd.includes("/") ? this.cwd.slice(0, this.cwd.lastIndexOf("/")) || "~" : "~";
+    else if (arg === ".") { /* no-op */ }
+    else if (arg.startsWith("/")) this.cwd = arg === "/home/guest" ? "~" : arg.startsWith("/home/guest/") ? "~/" + arg.slice(12) : arg;
+    else this.cwd = (this.cwd === "~" ? "~" : this.cwd) + "/" + arg.replace(/\/+$/, "");
   }
 
   register(...bins: Binary[]): void {
@@ -67,13 +87,20 @@ export class Shell {
   /** Run one command line. The caller displays its own prompt + echo. */
   async run(line: string, io: ShellIO): Promise<void> {
     const argv = line.trim().split(/\s+/).filter(Boolean);
-    const ctx: ShellContext = { io, session: this.session, prompt: this.prompt };
+    const ctx: ShellContext = { io, session: this.session, prompt: this.prompt, shell: this };
     const bin = argv.length ? this.registry.get(argv[0]) : undefined;
 
     // context: the typed line becomes part of the transcript the model sees
     // (a binary may rewrite it into the phrasing the corpus actually knows)
     this.session.feed((bin?.rewrite ? bin.rewrite(line) : line) + "\n");
     if (argv.length === 0) return;
+
+    if (argv[0] === "cd") {
+      // builtin, like a real shell: silent success, the prompt moves
+      this.applyCd(argv[1]);
+      this.session.feed(this.prompt);
+      return;
+    }
 
     if (bin?.kind === "scripted" && bin.run) {
       await bin.run(argv, ctx);

@@ -140,3 +140,32 @@ test("Shell with fake session: output reaches the screen, prompt stripped", asyn
   assert.ok(screen().includes("notes.txt"));
   assert.ok(!screen().includes("$ "), "the model's own prompt must never display");
 });
+
+test("Shell cd builtin: location-aware prompt, pure string navigation", async () => {
+  const { session } = fakeSession("x\n");
+  const shell = new Shell(session, { prompt: "guest@bity:~$ ", seed: 1 });
+  const { io } = countingIO();
+
+  assert.equal(shell.prompt, "guest@bity:~$ ");
+  await shell.run("cd projects", io);
+  assert.equal(shell.prompt, "guest@bity:~/projects$ ");
+  await shell.run("cd src", io);
+  assert.equal(shell.prompt, "guest@bity:~/projects/src$ ");
+  await shell.run("cd ..", io);
+  assert.equal(shell.prompt, "guest@bity:~/projects$ ");
+  await shell.run("cd", io);
+  assert.equal(shell.prompt, "guest@bity:~$ ");
+  await shell.run("cd /home/guest/pod", io);
+  assert.equal(shell.prompt, "guest@bity:~/pod$ ");
+  await shell.run("cd ..", io);
+  await shell.run("cd ..", io); // at home already: stays home
+  assert.equal(shell.prompt, "guest@bity:~$ ");
+});
+
+test("Shell static prompt stays static (cd still navigates silently)", async () => {
+  const { session, seen } = fakeSession("x\n");
+  const shell = new Shell(session, { prompt: "$ ", seed: 1 });
+  await shell.run("cd somewhere", (countingIO()).io);
+  assert.equal(shell.prompt, "$ "); // non-templated prompt unchanged
+  assert.equal(seen.length, 0);     // cd is a builtin: the model is never consulted
+});

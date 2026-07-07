@@ -21,8 +21,8 @@ const SYNTH_TARGET = Math.round(parseFloat(opt("--synth-mb", "9")) * 1024 * 1024
 const rng = new RNG(parseInt(opt("--seed", "1234"), 10));
 
 const fmt = (recs) =>
-  recs.map(({ cmd, output }) =>
-    PROMPT + cmd + "\n" + (output === "" ? "" : output.endsWith("\n") ? output : output + "\n")).join("");
+  recs.map(({ cmd, output, prompt }) =>
+    (prompt ?? PROMPT) + cmd + "\n" + (output === "" ? "" : output.endsWith("\n") ? output : output + "\n")).join("");
 
 // ---- synthesize sessions ------------------------------------------------------
 const iters = GENERATORS.map((g) => ({ ...g, it: g.gen(rng), count: 0 }));

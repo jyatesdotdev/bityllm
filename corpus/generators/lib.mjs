@@ -14,6 +14,8 @@ export class RNG {
 }
 
 export const PROMPT = "guest@bity:~$ ";
+/** prompt for a cwd like "~" or "~/pod" — the path lives in the prompt */
+export const promptFor = (cwd) => `guest@bity:${cwd}$ `;
 export const pick = (rng, arr) => arr[Math.floor(rng.random() * arr.length)];
 export const randint = (rng, lo, hi) => lo + Math.floor(rng.random() * (hi - lo)); // [lo, hi)
 export const chance = (rng, p) => rng.random() < p;

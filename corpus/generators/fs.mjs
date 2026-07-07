@@ -1,7 +1,7 @@
 // Filesystem binaries over a small invented world: ls, cat, cd, pwd, mkdir,
 // touch, rm, du, tree. Formats match real Debian coreutils captures.
 
-import { pick, randint, chance, shortDate, copyArg, contentFor, rec } from "./lib.mjs";
+import { pick, randint, chance, shortDate, copyArg, contentFor, promptFor, rec } from "./lib.mjs";
 
 const HOME_BASE = ["projects", "notes.txt", "todo.md"];
 const HOME_EXTRA = ["backup.tar.gz", "data.csv", "scripts", "main.py", "index.html", "draft.txt", "photos", "bin", "logs", "config.yaml"];
@@ -70,105 +70,141 @@ function randName(rng) {
 }
 
 export function fsSessionBlock(rng) {
-  const BASE = ["notes.txt", "projects", "todo.md"]; // fixed, always sorted first
-  const created = []; // creation order, appended after base in listings
-  const meta = new Map(); // name → { dir: bool, content: string }
+  // v7: sessions have LOCATION. The prompt carries the path; cd is a builtin
+  // (silent success); listings/creations are per-directory; history lists the
+  // session's own commands. Everything name-shaped is copy-from-context.
+  const locs = new Map([["~", { base: ["notes.txt", "projects", "todo.md"], created: [], meta: new Map() }]]);
+  let cwd = "~";
+  const here = () => locs.get(cwd);
+  const R = (cmd, output) => ({ cmd, output, prompt: promptFor(cwd) });
+  const cmds = [];
+  const recs = [];
+  const push = (r) => { cmds.push(r.cmd); recs.push(r); };
 
-  const listing = () => [...BASE, ...created];
-  const ls = () => rec("ls", listing().join("  "));
+  const listing = () => [...here().base, ...here().created];
+  const ls = () => R("ls", listing().join("  "));
   const lsLa = () => {
-    const rows = [`total ${randint(rng, 20, 96)}`];
+    const rows = [`total ${randint(rng, 12, 96)}`];
     for (const e of [".", "..", ...listing()]) {
-      const isDir = e === "." || e === ".." || e === "projects" || meta.get(e)?.dir === true;
+      const m = here().meta.get(e);
+      const isDir = e === "." || e === ".." || e === "projects" || e === "src" || m?.dir === true;
       const owner = e === ".." ? "root  root " : "guest guest";
       const size = isDir ? 4096 : pick(rng, [220, 807, 1024, 1943, 3526, 5842]);
       rows.push(`${isDir ? "drwxr-xr-x" : "-rw-r--r--"} ${isDir ? randint(rng, 2, 5) : 1} ${owner} ${String(size).padStart(5, " ")} ${shortDate(rng)} ${e}`);
     }
-    return rec("ls -la", rows.join("\n"));
+    return R("ls -la", rows.join("\n"));
   };
-  // cat a created name: written → its words, touched → empty, dir → error
-  const catCreated = (name) => {
-    const m = meta.get(name);
-    if (m.dir) return rec(`cat ${name}`, `cat: ${name}: Is a directory`);
-    return rec(`cat ${name}`, m.content);
+  const pwdPath = () => (cwd === "~" ? "/home/guest" : "/home/guest/" + cwd.slice(2));
+  const catName = (name) => {
+    const m = here().meta.get(name);
+    if (!m) return R(`cat ${name}`, `cat: ${name}: No such file or directory`);
+    if (m.dir) return R(`cat ${name}`, `cat: ${name}: Is a directory`);
+    return R(`cat ${name}`, m.content);
   };
 
-  const recs = [];
-  if (chance(rng, 0.4)) recs.push(ls()); // "before" listing
-  const mutations = randint(rng, 1, 4);
+  if (chance(rng, 0.35)) push(ls());
+  const mutations = randint(rng, 2, 5);
   for (let m = 0; m < mutations; m++) {
     const roll = rng.random();
     let lastRemoved = null;
-    if (roll < 0.2) {
-      const d = randName(rng).replace(/\.\w+$/, ""); // dirs: no extension
-      created.push(d);
-      meta.set(d, { dir: true, content: "" });
-      recs.push(rec(`mkdir ${d}`, ""));
-      if (chance(rng, 0.25)) recs.push(rec(`ls ${d}`, "")); // fresh dir is empty
-      if (chance(rng, 0.25)) {
-        recs.push(rec(`cd ${d}`, ""));
-        recs.push(rec("pwd", `/home/guest/${d}`));
-        recs.push(rec("cd ..", ""));
+    if (roll < 0.14) {
+      const d = randName(rng).replace(/\.\w+$/, "");
+      here().created.push(d);
+      here().meta.set(d, { dir: true, content: "" });
+      push(R(`mkdir ${d}`, ""));
+      if (chance(rng, 0.2)) push(R(`ls ${d}`, ""));
+    } else if (roll < 0.3) {
+      // cd: a builtin — silent, prompt changes for everything after
+      if (cwd === "~") {
+        const dirs = [...here().created.filter((n) => here().meta.get(n)?.dir), "projects"];
+        const d = pick(rng, dirs);
+        if (!locs.has("~/" + d)) {
+          locs.set("~/" + d, d === "projects"
+            ? { base: ["README.md", "src"], created: [], meta: new Map([["README.md", { dir: false, content: "# bityllm\n\nA tiny LLM in pure TypeScript." }], ["src", { dir: true, content: "" }]]) }
+            : { base: [], created: [], meta: new Map() });
+        }
+        push(R(`cd ${d}`, ""));
+        cwd = "~/" + d;
+      } else {
+        push(R("cd ..", ""));
+        cwd = "~";
       }
-    } else if (roll < 0.4) {
+      const pv = rng.random();
+      if (pv < 0.4) push(R("pwd", pwdPath()));
+      else if (pv < 0.75) push(ls());
+      continue; // cd block carries its own payoff
+    } else if (roll < 0.46) {
       const f = randName(rng);
-      created.push(f);
-      meta.set(f, { dir: false, content: "" }); // touch → empty file
-      recs.push(rec(`touch ${f}`, ""));
-    } else if (roll < 0.6) {
-      // write-then-read-back: the referential-consistency drill
+      here().created.push(f);
+      here().meta.set(f, { dir: false, content: "" });
+      push(R(`touch ${f}`, ""));
+    } else if (roll < 0.64) {
       const f = randName(rng);
       const words = Array.from({ length: randint(rng, 1, 3) }, () => copyArg(rng)).join(" ");
-      created.push(f);
-      meta.set(f, { dir: false, content: words });
-      recs.push(rec(`echo ${words} > ${f}`, ""));
-      if (chance(rng, 0.2)) recs.push(rec(`grep ${words.split(" ")[0]} ${f}`, words));
-    } else if (roll < 0.72 && created.some((n) => !meta.get(n)?.dir)) {
-      // mv: rename — listings and contents follow the new name
-      const files = created.filter((n) => !meta.get(n)?.dir);
+      here().created.push(f);
+      here().meta.set(f, { dir: false, content: words });
+      push(R(`echo ${words} > ${f}`, ""));
+      if (chance(rng, 0.15)) push(R(`grep ${words.split(" ")[0]} ${f}`, words));
+    } else if (roll < 0.74 && here().created.some((n) => here().meta.get(n)?.content)) {
+      // append: files grow lines; cat shows them all; wc -l counts them
+      const files = here().created.filter((n) => here().meta.get(n)?.content);
+      const f = pick(rng, files);
+      const words = Array.from({ length: randint(rng, 1, 2) }, () => copyArg(rng)).join(" ");
+      const mm = here().meta.get(f);
+      mm.content = mm.content + "\n" + words;
+      push(R(`echo ${words} >> ${f}`, ""));
+      const pv = rng.random();
+      if (pv < 0.5) push(catName(f));
+      else if (pv < 0.7) push(R(`wc -l ${f}`, `${mm.content.split("\n").length} ${f}`));
+    } else if (roll < 0.82 && here().created.some((n) => !here().meta.get(n)?.dir)) {
+      const files = here().created.filter((n) => !here().meta.get(n)?.dir);
       const f = pick(rng, files);
       const g = randName(rng);
-      created[created.indexOf(f)] = g;
-      meta.set(g, meta.get(f));
-      meta.delete(f);
-      recs.push(rec(`mv ${f} ${g}`, ""));
-    } else if (roll < 0.82 && created.some((n) => !meta.get(n)?.dir)) {
-      // cp: duplicate — both names list, both cat identically
-      const files = created.filter((n) => !meta.get(n)?.dir);
-      const f = pick(rng, files);
-      const g = randName(rng);
-      created.push(g);
-      meta.set(g, { ...meta.get(f) });
-      recs.push(rec(`cp ${f} ${g}`, ""));
-      if (chance(rng, 0.3)) recs.push(catCreated(g));
-    } else if (created.length > 0 && chance(rng, 0.7)) {
-      const f = pick(rng, created);
-      created.splice(created.indexOf(f), 1);
-      recs.push(rec(`rm ${meta.get(f)?.dir ? "-r " : ""}${f}`, ""));
-      meta.delete(f);
+      if (chance(rng, 0.6)) {
+        here().created[here().created.indexOf(f)] = g;
+        here().meta.set(g, here().meta.get(f));
+        here().meta.delete(f);
+        push(R(`mv ${f} ${g}`, ""));
+      } else {
+        here().created.push(g);
+        here().meta.set(g, { ...here().meta.get(f) });
+        push(R(`cp ${f} ${g}`, ""));
+        if (chance(rng, 0.3)) push(catName(g));
+      }
+    } else if (here().created.length > 0 && chance(rng, 0.75)) {
+      const f = pick(rng, here().created);
+      here().created.splice(here().created.indexOf(f), 1);
+      push(R(`rm ${here().meta.get(f)?.dir ? "-r " : ""}${f}`, ""));
+      here().meta.delete(f);
       lastRemoved = f;
-    } else if (chance(rng, 0.5) && BASE.length > 1) {
-      const f = pick(rng, BASE.filter((n) => n !== "projects"));
-      BASE.splice(BASE.indexOf(f), 1);
-      recs.push(rec(`rm ${f}`, ""));
+    } else if (cwd === "~" && here().base.length > 1 && chance(rng, 0.5)) {
+      const f = pick(rng, here().base.filter((n) => n !== "projects"));
+      here().base.splice(here().base.indexOf(f), 1);
+      push(R(`rm ${f}`, ""));
       lastRemoved = f;
     } else {
-      recs.push(rec(`rm ghost.txt`, `rm: cannot remove 'ghost.txt': No such file or directory`));
+      push(R(`rm ghost.txt`, `rm: cannot remove 'ghost.txt': No such file or directory`));
     }
-    // payoff after EVERY mutation: usually a listing, sometimes a read-back
+    // payoff
     const pv = rng.random();
     if (lastRemoved !== null && pv < 0.25) {
-      recs.push(rec(`cat ${lastRemoved}`, `cat: ${lastRemoved}: No such file or directory`)); // gone means gone
-      recs.push(ls());
-    } else if (pv < 0.55 || created.length === 0) recs.push(ls());
-    else if (pv < 0.75) recs.push(lsLa());
-    else {
-      const written = created.filter((n) => meta.get(n)?.content);
-      recs.push(catCreated(written.length > 0 && chance(rng, 0.75) ? pick(rng, written) : pick(rng, created)));
-    }
+      push(catName(lastRemoved));
+      push(ls());
+    } else if (pv < 0.5) push(ls());
+    else if (pv < 0.68) push(lsLa());
+    else if (pv < 0.78) push(R("pwd", pwdPath()));
+    else if (listing().length > 0) {
+      const written = here().created.filter((n) => here().meta.get(n)?.content && !here().meta.get(n)?.dir);
+      if (written.length > 0 && chance(rng, 0.75)) push(catName(pick(rng, written)));
+      else push(ls());
+    } else push(ls());
   }
-  // closing read-back reinforces cat-after-create at longer range
-  if (created.length > 0 && chance(rng, 0.5)) recs.push(catCreated(pick(rng, created)));
+  // history: the session remembers ITSELF (long-range self-consistency)
+  if (cmds.length >= 3 && chance(rng, 0.15)) {
+    const start = randint(rng, 100, 900);
+    const body = cmds.map((c, i) => `  ${start + i}  ${c}`).join("\n") + `\n  ${start + cmds.length}  history`;
+    push(R("history", body));
+  }
   return recs;
 }
 

@@ -203,8 +203,9 @@ numbers disappoint.
 | `models/terminal-micro-v4.bity` | 2.7M | corpus v4 (16k, GPU) | copy circuit formed — syllable-dialect only |
 | `models/terminal-micro-v5.bity` | 2.7M | corpus v5 (16k, GPU) | universal copy: mkdir flowers → ls shows flowers |
 | `models/terminal-mini.bity` | 10.7M | corpus v5 @ 22.8MB (16k, GPU, 6h) | crisp copier (echo xk4vw9 ✓), perfect cowsay, IP-consistent ping |
-| `models/terminal-mini-v6.bity` | 10.7M | corpus v6 (16k, GPU, 6h) | **filesystem consistency: mv/rm/cd/pwd exact, echo>file read-back, cat-after-rm ENOENT** |
-| `models/terminal.int8.bity` | — | — | whatever the demo currently serves (mini) |
+| `models/terminal-mini-v6.bity` | 10.7M | corpus v6 (16k, GPU, 6h) | filesystem consistency: mv/rm/pwd, echo>file read-back, cat-after-rm ENOENT |
+| `models/terminal-mini-v7.bity` | 10.7M | corpus v7 (16k, GPU, 6h) | **persistent location: `cd` walks the tree, prompt carries the path (`~/projects$`), per-dir `ls`; `wc -l`, `which`.** Ceiling: multi-word `cat` content copy still first-word (0% at 11M → capacity, scale trigger). Audit: `node bench/eval.mjs` |
+| `models/terminal.int8.bity` | — | — | **currently deployed: mini-v7** |
 
 Checkpoint format (`bity1`): `[u32 headerLen][JSON header][raw f32/i8 blobs]` —
 config + tokenizer vocab travel inside; `deserialize()` handles f32 and int8.

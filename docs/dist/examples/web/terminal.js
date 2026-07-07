@@ -154,7 +154,7 @@ async function main() {
         io.write(line);
         scheduleGhost();
     };
-    io.write(PROMPT);
+    io.write(shell.prompt);
     const knob = (id, positions, start, persist) => {
         const el = document.getElementById(id);
         const dial = el.querySelector(".dial");
@@ -197,8 +197,9 @@ async function main() {
                         line = "";
                         io.clear();
                         session.reset();
-                        session.feed(PROMPT);
-                        io.write("bity login: guest\n\n" + PROMPT);
+                        shell.cwd = "~";
+                        session.feed(shell.prompt);
+                        io.write("bity login: guest\n\n" + shell.prompt);
                     });
                 }
                 everBooted = true;
@@ -251,7 +252,7 @@ async function main() {
                 io.write(`\n[bity kernel panic: ${err instanceof Error ? err.message : String(err)}]\n`);
             }
             busy = false;
-            io.write(PROMPT);
+            io.write(shell.prompt);
         }
         else if (e.key === "Backspace") {
             e.preventDefault();
@@ -267,7 +268,7 @@ async function main() {
             if (c.kind === "complete" || c.kind === "extend")
                 replaceLine(c.text);
             else if (c.kind === "list")
-                io.write("\n" + c.options.join("  ") + "\n" + PROMPT + line);
+                io.write("\n" + c.options.join("  ") + "\n" + shell.prompt + line);
         }
         else if (e.key === "ArrowRight" || e.key === "End") {
             if (ghostText) {

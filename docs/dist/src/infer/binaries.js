@@ -85,6 +85,7 @@ export const BINARIES = [
             await io.delay(1200);
             io.clear();
             session.reset();
+            ctx.shell.cwd = "~"; // reboot forgets where you were
             io.write("Debian GNU/Linux 13 bity ttyAMA0\n\nbity login: guest\n");
             await io.delay(350);
             // no session.feed(prompt) here — Shell.run adds the post-command prompt

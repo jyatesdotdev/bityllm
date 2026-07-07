@@ -40,9 +40,16 @@ export function* copyGen(rng) {
         yield rec(`cd ${d}`, `bash: cd: ${d}: No such file or directory`);
       }
     } else if (r < 0.72) {
-      // command-not-found echoes the command itself
-      const c = randWord(rng);
-      yield rec(c, `bash: ${c}: command not found`);
+      const v2 = rng.random();
+      if (v2 < 0.7) {
+        // command-not-found echoes the command itself
+        const c = randWord(rng);
+        yield rec(c, `bash: ${c}: command not found`);
+      } else {
+        // which: path echoes the argument
+        const c = pick(rng, ["ls", "cat", "ping", "git", "curl", "cowsay", "fortune", "grep", "df", "uname"]);
+        yield rec(`which ${c}`, `/usr/bin/${c}`);
+      }
     } else if (r < 0.86) {
       // network errors / headers that echo the host
       const h = `${randWord(rng)}.${pick(rng, ["dev", "com", "org", "net", "io"])}`;
