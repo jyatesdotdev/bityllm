@@ -33,12 +33,14 @@
       vertical-align: text-bottom; animation: blink 1.1s steps(1) infinite; }
     @keyframes blink { 50% { opacity: 0; } }
     footer { color: #274427; font-size: 11px; padding-bottom: 14px; user-select: none; }
+    a { color: #3a7a3a; text-decoration: none; }
+    a:hover { color: #62c462; text-decoration: underline; }
   </style>
 </head>
 <body>
   <header>bity — <b>a hallucinated terminal</b> · every byte below is dreamed by a tiny LLM running in your tab · try <b>help</b>, <b>ping bity.dev</b>, <b>fortune</b>, <b>reboot</b></header>
   <div id="crt"><pre id="screen"></pre><span id="cursor"></span></div>
-  <footer>bityllm · pure TypeScript · zero dependencies · trained from scratch on this machine</footer>
+  <footer>bityllm · pure TypeScript · zero dependencies · trained from scratch on a single Mac · <a href="https://github.com/jyatesdotdev/bityllm" target="_blank" rel="noopener">source &amp; story on GitHub</a></footer>
   <script type="module" src="./dist/examples/web/terminal.js"></script>
 </body>
 </html>

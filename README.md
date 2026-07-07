@@ -5,7 +5,7 @@
 A tiny GPT trained **from scratch** in **pure TypeScript** with **zero runtime
 dependencies**, powering a terminal that dreams: every command in the browser
 demo — `ping`, `cowsay`, `reboot`, even `mkdir` — is hallucinated,
-character-by-character, by an 11M-parameter model trained on this machine.
+character-by-character, by an 11M-parameter model trained from scratch on a single Mac.
 
 **▶ Live demo:** https://jyatesdotdev.github.io/bityllm/ — type `help`, `ping bity.dev`,
 `cowsay moo`, or `mkdir something` and then `ls` (it remembers — the model
