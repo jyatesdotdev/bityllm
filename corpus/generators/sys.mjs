@@ -91,9 +91,13 @@ export function* sysGen(rng) {
       else if (v < 0.7) yield rec("arch", k.arch);
       else yield rec("cat /etc/debian_version", "13.1");
     } else if (r < 0.95) {
-      const msg = pick(rng, ["hello", "hello world", "test", "$HOME", "$((6 * 7))", "done", "it works"]);
-      const out = msg === "$HOME" ? "/home/guest" : msg === "$((6 * 7))" ? "42" : msg;
-      yield rec(`echo ${msg}`, out);
+      if (chance(rng, 0.15)) {
+        yield rec(pick(rng, ["exit", "logout"]), "logout");
+      } else {
+        const msg = pick(rng, ["hello", "hello world", "test", "$HOME", "$((6 * 7))", "done", "it works"]);
+        const out = msg === "$HOME" ? "/home/guest" : msg === "$((6 * 7))" ? "42" : msg;
+        yield rec(`echo ${msg}`, out);
+      }
     } else {
       yield rec("ps aux", psAux(rng));
     }

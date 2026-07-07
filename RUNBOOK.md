@@ -202,7 +202,8 @@ numbers disappoint.
 | `models/terminal-micro-v3.bity` | 2.7M | corpus v3 (12k, GPU) | stateful structure, but names dreamed not copied |
 | `models/terminal-micro-v4.bity` | 2.7M | corpus v4 (16k, GPU) | copy circuit formed — syllable-dialect only |
 | `models/terminal-micro-v5.bity` | 2.7M | corpus v5 (16k, GPU) | universal copy: mkdir flowers → ls shows flowers |
-| `models/terminal-mini.bity` | 10.7M | corpus v5 @ 22.8MB (16k, GPU, 6h) | **crisp copier (echo xk4vw9 ✓), perfect cowsay, IP-consistent ping; ~116 tok/s in-browser** |
+| `models/terminal-mini.bity` | 10.7M | corpus v5 @ 22.8MB (16k, GPU, 6h) | crisp copier (echo xk4vw9 ✓), perfect cowsay, IP-consistent ping |
+| `models/terminal-mini-v6.bity` | 10.7M | corpus v6 (16k, GPU, 6h) | **filesystem consistency: mv/rm/cd/pwd exact, echo>file read-back, cat-after-rm ENOENT** |
 | `models/terminal.int8.bity` | — | — | whatever the demo currently serves (mini) |
 
 Checkpoint format (`bity1`): `[u32 headerLen][JSON header][raw f32/i8 blobs]` —

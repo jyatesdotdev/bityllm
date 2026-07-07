@@ -1,7 +1,7 @@
 // Filesystem binaries over a small invented world: ls, cat, cd, pwd, mkdir,
 // touch, rm, du, tree. Formats match real Debian coreutils captures.
 
-import { pick, randint, chance, shortDate, copyArg, rec } from "./lib.mjs";
+import { pick, randint, chance, shortDate, copyArg, contentFor, rec } from "./lib.mjs";
 
 const HOME_BASE = ["projects", "notes.txt", "todo.md"];
 const HOME_EXTRA = ["backup.tar.gz", "data.csv", "scripts", "main.py", "index.html", "draft.txt", "photos", "bin", "logs", "config.yaml"];
@@ -72,19 +72,25 @@ function randName(rng) {
 export function fsSessionBlock(rng) {
   const BASE = ["notes.txt", "projects", "todo.md"]; // fixed, always sorted first
   const created = []; // creation order, appended after base in listings
-  const isDirCreated = new Map();
+  const meta = new Map(); // name → { dir: bool, content: string }
 
   const listing = () => [...BASE, ...created];
   const ls = () => rec("ls", listing().join("  "));
   const lsLa = () => {
     const rows = [`total ${randint(rng, 20, 96)}`];
     for (const e of [".", "..", ...listing()]) {
-      const isDir = e === "." || e === ".." || e === "projects" || isDirCreated.get(e) === true;
+      const isDir = e === "." || e === ".." || e === "projects" || meta.get(e)?.dir === true;
       const owner = e === ".." ? "root  root " : "guest guest";
       const size = isDir ? 4096 : pick(rng, [220, 807, 1024, 1943, 3526, 5842]);
       rows.push(`${isDir ? "drwxr-xr-x" : "-rw-r--r--"} ${isDir ? randint(rng, 2, 5) : 1} ${owner} ${String(size).padStart(5, " ")} ${shortDate(rng)} ${e}`);
     }
     return rec("ls -la", rows.join("\n"));
+  };
+  // cat a created name: written → its words, touched → empty, dir → error
+  const catCreated = (name) => {
+    const m = meta.get(name);
+    if (m.dir) return rec(`cat ${name}`, `cat: ${name}: Is a directory`);
+    return rec(`cat ${name}`, m.content);
   };
 
   const recs = [];
@@ -92,32 +98,77 @@ export function fsSessionBlock(rng) {
   const mutations = randint(rng, 1, 4);
   for (let m = 0; m < mutations; m++) {
     const roll = rng.random();
-    if (roll < 0.42) {
+    let lastRemoved = null;
+    if (roll < 0.2) {
       const d = randName(rng).replace(/\.\w+$/, ""); // dirs: no extension
       created.push(d);
-      isDirCreated.set(d, true);
+      meta.set(d, { dir: true, content: "" });
       recs.push(rec(`mkdir ${d}`, ""));
-    } else if (roll < 0.84) {
+      if (chance(rng, 0.25)) recs.push(rec(`ls ${d}`, "")); // fresh dir is empty
+      if (chance(rng, 0.25)) {
+        recs.push(rec(`cd ${d}`, ""));
+        recs.push(rec("pwd", `/home/guest/${d}`));
+        recs.push(rec("cd ..", ""));
+      }
+    } else if (roll < 0.4) {
       const f = randName(rng);
       created.push(f);
-      isDirCreated.set(f, false);
+      meta.set(f, { dir: false, content: "" }); // touch → empty file
       recs.push(rec(`touch ${f}`, ""));
+    } else if (roll < 0.6) {
+      // write-then-read-back: the referential-consistency drill
+      const f = randName(rng);
+      const words = Array.from({ length: randint(rng, 1, 3) }, () => copyArg(rng)).join(" ");
+      created.push(f);
+      meta.set(f, { dir: false, content: words });
+      recs.push(rec(`echo ${words} > ${f}`, ""));
+      if (chance(rng, 0.2)) recs.push(rec(`grep ${words.split(" ")[0]} ${f}`, words));
+    } else if (roll < 0.72 && created.some((n) => !meta.get(n)?.dir)) {
+      // mv: rename — listings and contents follow the new name
+      const files = created.filter((n) => !meta.get(n)?.dir);
+      const f = pick(rng, files);
+      const g = randName(rng);
+      created[created.indexOf(f)] = g;
+      meta.set(g, meta.get(f));
+      meta.delete(f);
+      recs.push(rec(`mv ${f} ${g}`, ""));
+    } else if (roll < 0.82 && created.some((n) => !meta.get(n)?.dir)) {
+      // cp: duplicate — both names list, both cat identically
+      const files = created.filter((n) => !meta.get(n)?.dir);
+      const f = pick(rng, files);
+      const g = randName(rng);
+      created.push(g);
+      meta.set(g, { ...meta.get(f) });
+      recs.push(rec(`cp ${f} ${g}`, ""));
+      if (chance(rng, 0.3)) recs.push(catCreated(g));
     } else if (created.length > 0 && chance(rng, 0.7)) {
       const f = pick(rng, created);
       created.splice(created.indexOf(f), 1);
-      recs.push(rec(`rm ${isDirCreated.get(f) ? "-r " : ""}${f}`, ""));
+      recs.push(rec(`rm ${meta.get(f)?.dir ? "-r " : ""}${f}`, ""));
+      meta.delete(f);
+      lastRemoved = f;
+    } else if (chance(rng, 0.5) && BASE.length > 1) {
+      const f = pick(rng, BASE.filter((n) => n !== "projects"));
+      BASE.splice(BASE.indexOf(f), 1);
+      recs.push(rec(`rm ${f}`, ""));
+      lastRemoved = f;
     } else {
-      const f = pick(rng, ["notes.txt", "todo.md"]);
-      if (chance(rng, 0.5)) {
-        const i = BASE.indexOf(f);
-        if (i >= 0) BASE.splice(i, 1);
-        recs.push(rec(`rm ${f}`, ""));
-      } else {
-        recs.push(rec(`rm ghost.txt`, `rm: cannot remove 'ghost.txt': No such file or directory`));
-      }
+      recs.push(rec(`rm ghost.txt`, `rm: cannot remove 'ghost.txt': No such file or directory`));
     }
-    recs.push(chance(rng, 0.7) ? ls() : lsLa()); // payoff after EVERY mutation
+    // payoff after EVERY mutation: usually a listing, sometimes a read-back
+    const pv = rng.random();
+    if (lastRemoved !== null && pv < 0.25) {
+      recs.push(rec(`cat ${lastRemoved}`, `cat: ${lastRemoved}: No such file or directory`)); // gone means gone
+      recs.push(ls());
+    } else if (pv < 0.55 || created.length === 0) recs.push(ls());
+    else if (pv < 0.75) recs.push(lsLa());
+    else {
+      const written = created.filter((n) => meta.get(n)?.content);
+      recs.push(catCreated(written.length > 0 && chance(rng, 0.75) ? pick(rng, written) : pick(rng, created)));
+    }
   }
+  // closing read-back reinforces cat-after-create at longer range
+  if (created.length > 0 && chance(rng, 0.5)) recs.push(catCreated(pick(rng, created)));
   return recs;
 }
 
@@ -135,11 +186,21 @@ export function* fsGen(rng) {
       else if (v < 0.9) yield rec("ls projects", pick(rng, ["README.md  src", "README.md  bityllm  dotfiles", "README.md  src  test  package.json"]));
       else yield rec(`ls ${pick(rng, MISSING)}`, `ls: cannot access '${pick(rng, MISSING)}': No such file or directory`);
     } else if (r < 0.58) {
-      // cat: known files, invented-but-plausible, and errors
+      // cat: known files, extension-typed dreams, dirs, and errors
       const v = rng.random();
-      if (v < 0.72) {
+      if (v < 0.45) {
         const name = pick(rng, Object.keys(FILES));
         yield rec(`cat ${name}`, FILES[name](rng));
+      } else if (v < 0.78) {
+        // any extension-bearing name gets extension-shaped contents — covers
+        // the listed-but-never-catted pool AND generalizes to dreamed names
+        const name = chance(rng, 0.5)
+          ? pick(rng, ["data.csv", "main.py", "index.html", "config.yaml", "draft.txt", "backup.log", "notes2.md"])
+          : copyArg(rng) + pick(rng, [".txt", ".csv", ".py", ".md", ".log", ".sh", ".yaml", ".json", ".html"]);
+        yield rec(`cat ${name}`, contentFor(rng, name));
+      } else if (v < 0.88) {
+        const d = pick(rng, ["projects", "scripts", "photos", "bin", "logs"]);
+        yield rec(`cat ${d}`, `cat: ${d}: Is a directory`);
       } else {
         const m = pick(rng, MISSING);
         yield rec(`cat ${m}`, `cat: ${m}: No such file or directory`);
@@ -152,7 +213,12 @@ export function* fsGen(rng) {
     } else if (r < 0.84) {
       const f = pick(rng, ["test.txt", "newdir", "tmp.log", "draft2.md", "data"]);
       const v = rng.random();
-      if (v < 0.3) yield rec(`touch ${f}`, "");
+      if (v < 0.2) yield rec(`touch ${f}`, "");
+      else if (v < 0.3) {
+        const g = pick(rng, ["old.txt", "missing.csv", "ghost"]);
+        yield rec(chance(rng, 0.5) ? `mv ${g} new.txt` : `cp ${g} new.txt`,
+          `${chance(rng, 0.5) ? "mv" : "cp"}: cannot stat '${g}': No such file or directory`);
+      }
       else if (v < 0.5) yield rec(`mkdir ${f}`, chance(rng, 0.8) ? "" : `mkdir: cannot create directory '${f}': File exists`);
       else if (v < 0.75) yield rec(`rm ${f}`, chance(rng, 0.7) ? "" : `rm: cannot remove '${f}': No such file or directory`);
       else yield rec(`rm -rf /`, "rm: it is dangerous to operate recursively on '/'\nrm: use --no-preserve-root to override this failsafe");

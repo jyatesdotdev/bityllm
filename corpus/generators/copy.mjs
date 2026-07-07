@@ -4,7 +4,7 @@
 // impossible). Once the mechanism exists at echo-range, it should generalize
 // to ping headers and stateful ls listings (positional, not lexical).
 
-import { pick, randint, chance, copyArg as randWord, rec } from "./lib.mjs";
+import { pick, randint, chance, copyArg as randWord, contentFor, rec } from "./lib.mjs";
 
 const EXT = ["", ".txt", ".log", ".md", ".csv", ".sh", ".py"];
 const name = (rng) => randWord(rng) + pick(rng, EXT);
@@ -15,18 +15,24 @@ export function* copyGen(rng) {
     if (r < 0.34) {
       // echo — the purest copy task (distance ~6 chars)
       const v = rng.random();
-      if (v < 0.5) {
+      if (v < 0.4) {
         const w = randWord(rng);
         yield rec(`echo ${w}`, w);
-      } else {
+      } else if (v < 0.75) {
         const words = Array.from({ length: randint(rng, 2, 4) }, () => randWord(rng)).join(" ");
         yield rec(`echo ${words}`, words);
+      } else {
+        // humans quote things: quotes strip, contents echo verbatim
+        const words = Array.from({ length: randint(rng, 1, 3) }, () => randWord(rng)).join(" ");
+        const q = chance(rng, 0.5) ? `"` : `'`;
+        yield rec(`echo ${q}${words}${q}`, words);
       }
     } else if (r < 0.55) {
       // file errors that echo their argument
       const f = name(rng);
       const v = rng.random();
-      if (v < 0.4) yield rec(`cat ${f}`, `cat: ${f}: No such file or directory`);
+      if (v < 0.2) yield rec(`cat ${f}`, `cat: ${f}: No such file or directory`);
+      else if (v < 0.4) yield rec(`cat ${f}`, contentFor(rng, f)); // dreamed contents (still echoes name context)
       else if (v < 0.65) yield rec(`rm ${f}`, `rm: cannot remove '${f}': No such file or directory`);
       else if (v < 0.85) yield rec(`ls ${f}`, `ls: cannot access '${f}': No such file or directory`);
       else {

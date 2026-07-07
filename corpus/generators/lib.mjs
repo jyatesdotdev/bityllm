@@ -84,3 +84,39 @@ export function copyArg(rng) {
   if (r < 0.85) return randWord(rng);
   return pick(rng, ["backup", "report", "photos", "main", "config", "notes2", "hello", "data", "src", "temp"]);
 }
+
+/** Plausible file contents by extension — teaches `cat <any-name>` to dream
+ *  content matching the extension instead of defaulting to ENOENT. */
+export function contentFor(rng, name) {
+  const ext = (name.match(/\.(\w+)$/) || [])[1] ?? "";
+  const w = () => randWord(rng);
+  switch (ext) {
+    case "csv":
+      return `id,name,value\n1,${w()},${randint(rng, 1, 99)}\n2,${w()},${randint(rng, 1, 99)}\n3,${w()},${randint(rng, 1, 99)}`;
+    case "py":
+      return pick(rng, [
+        `#!/usr/bin/env python3\nprint("${w()}")`,
+        `def main():\n    return ${randint(rng, 0, 42)}\n\nif __name__ == "__main__":\n    main()`,
+      ]);
+    case "sh":
+      return `#!/bin/sh\necho "${w()}"\nexit 0`;
+    case "log":
+      return `[${randint(rng, 10, 23)}:${String(randint(rng, 10, 59))}:0${randint(rng, 1, 9)}] started\n[${randint(rng, 10, 23)}:${String(randint(rng, 10, 59))}:1${randint(rng, 1, 9)}] ok: ${w()}\n[${randint(rng, 10, 23)}:${String(randint(rng, 10, 59))}:2${randint(rng, 1, 9)}] done`;
+    case "md":
+      return `# ${w()}\n\n- ${w()}\n- ${w()}`;
+    case "yaml":
+    case "yml":
+      return `name: ${w()}\nport: ${pick(rng, [8080, 3000, 9090, 8143])}\nenabled: ${pick(rng, ["true", "false"])}`;
+    case "html":
+      return `<html>\n<body>\n<h1>${w()}</h1>\n</body>\n</html>`;
+    case "json":
+      return `{"name": "${w()}", "count": ${randint(rng, 1, 99)}}`;
+    case "txt":
+    default:
+      return pick(rng, [
+        `${w()} ${w()} ${w()}`,
+        `remember: ${w()}\nthen ${w()}`,
+        `${w()}\n${w()} ${w()}`,
+      ]);
+  }
+}
