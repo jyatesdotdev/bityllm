@@ -1,0 +1,17 @@
+node_modules/
+
+# built web bundle (rebuilt by `npm run web`; the published copy lives in docs/)
+examples/web/dist/
+
+# raw hardware logs — contain real machine identifiers; only the SCRUBBED
+# derivatives in corpus/data/ are ever committed or trained on
+dmesg.*.txt
+
+# f32 training checkpoints: large and reproducible (see RUNBOOK §4).
+# The int8 demo model IS committed (models/terminal.int8.bity + docs/ copy).
+models/*.bity
+!models/terminal.int8.bity
+
+# generated corpus texts — deterministic rebuild via `npm run corpus`
+corpus/data/bity.corpus.txt
+corpus/data/synthetic.corpus.txt
