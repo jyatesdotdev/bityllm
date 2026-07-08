@@ -146,16 +146,25 @@ uv venv .venv && uv pip install --python .venv/bin/python mlx numpy   # one-time
 - **Parity gate:** `python train/mlx_train.py --parity /tmp/p.json --out /tmp/p.bity`
   then a Node forward on the same weights — verified **max Δlogit 1.2e-6**,
   argmax agrees. That's what proves the format/transpose/GELU mapping.
-- Deviation from the TS trainer: MLX AdamW decays **all** params (ours excludes
-  1-D biases/LayerNorm/embeddings). Measured (`bench/eval.mjs`, MLX vs
-  WebGPU-v7, 8 seeds/case): **core behaviors match at 100%** (cd/pwd/ls, echo
-  copy, rm→ENOENT, which, cowsay), but the fuzziest cases run a few points
-  softer under MLX (cat-of-uncreated `.csv` 75%→0%, `mv`→ls, multi-word
-  first-token) — the extra regularization on embeddings costs some template
-  memorization. **Both trainers hit the SAME hard ceilings** (nested `cd`,
-  multi-word content, touch→empty, `wc -l` = 0% in both) → those are
-  corpus/capacity limits, not trainer artifacts. Match the 2-D-only decay
-  grouping to close the gap.
+- Weight decay: MLX AdamW decays every param, but the TS trainer (and this
+  script) decay only the 2-D matmul weights. We set MLX `weight_decay=0` and
+  apply decoupled decay by hand to the block Linear weights (`decay_linears`).
+  An early version using MLX's decay-all cost a few points on the fuzziest cases
+  (cat-of-uncreated `.csv` 75%→0%, `mv`→ls) — the 2-D-only grouping recovers them.
+
+### Scale finding (10.7M → 25M, `8L/8H/512d`, MLX, 48 min)
+Ceiling experiment holding corpus + recipe constant, scaling only params
+(`bench/eval.mjs`, 8 seeds/case). **Scale broke some ceilings but not others:**
+- **Won:** `wc -l` line-count 0%→**100%**, `mv`→ls →**100%**, all fuzzy cases
+  solid → 25M is the best-behaved model yet (val loss 0.359).
+- **Held at 0% even at 25M:** **multi-word content copy** (`echo a b c > f; cat f`
+  returns only "a"). Three independent models (WebGPU-10.7M, MLX-10.7M, MLX-25M)
+  fail it identically → **NOT pure capacity** as first assumed; the copy circuit
+  reads back the *first* token reliably but was never forced to copy a longer
+  span. Next lever is **corpus** (heavier/longer multi-word write→read drills),
+  not just parameters.
+- nested `cd`, touch→empty stay 0% — pure **corpus gaps** (never taught), not
+  capacity; scale can't add what the data omits.
 
 ### Pause / resume (battery etc.)
 ```bash

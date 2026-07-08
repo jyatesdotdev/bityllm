@@ -176,7 +176,14 @@ def main():
     sched = optim.join_schedules(
         [optim.linear_schedule(1e-7, a.lr, warmup), optim.cosine_decay(a.lr, max(1, a.steps - warmup), a.lr * 0.1)],
         [warmup])
-    opt = optim.AdamW(learning_rate=sched, betas=[0.9, 0.95], weight_decay=0.1)
+    # AdamW with DECOUPLED weight decay applied to 2-D matmul weights only —
+    # matches the TS trainer's param groups (embeddings, LayerNorm, biases are
+    # excluded). MLX's built-in weight_decay hits every param, so we set it to 0
+    # and apply the decay ourselves to just the block Linear weights.
+    opt = optim.AdamW(learning_rate=sched, betas=[0.9, 0.95], weight_decay=0.0)
+    WD = 0.1
+    decay_linears = [lin for blk in model.blocks
+                     for lin in (blk.wq, blk.wk, blk.wv, blk.wo, blk.fc, blk.proj)]
 
     def loss_fn(model, x, y):
         logits = model(x)
@@ -206,6 +213,9 @@ def main():
     for it in range(1, a.steps + 1):
         x, y = batch()
         loss = step(x, y)
+        lr = opt.learning_rate  # decoupled weight decay, 2-D matmul weights only
+        for lin in decay_linears:
+            lin.weight = lin.weight * (1 - lr * WD)
         mx.eval(state, loss)
         tick += a.batch * T
         if it % 20 == 0:
