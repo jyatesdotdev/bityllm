@@ -166,6 +166,17 @@ Ceiling experiment holding corpus + recipe constant, scaling only params
 - nested `cd`, touch→empty stay 0% — pure **corpus gaps** (never taught), not
   capacity; scale can't add what the data omits.
 
+### bf16 mixed precision (`--bf16`) — measured no-op on Apple Silicon
+`--bf16` runs the matmuls in bf16; master weights, LayerNorm, softmax, loss, and
+the optimizer stay fp32, and the export stays fp32 (inference + parity unaffected).
+Measured A/B on M4 Pro: **+2–4% only** (25M 22.3k→22.7k tok/s; 10.7M 45.0k→46.9k) —
+noise, not the 1.5–2× bf16 gives on NVIDIA. Why: Apple GPUs have no tensor cores
+(fp32 and bf16 matmul run at similar rates), and keeping an fp32 master means
+casting fp32→bf16 every forward — that traffic cancels the bandwidth saved. Kept as
+opt-in; fp32 is the default. Loss identical to 3 decimals, so it's safe, just
+pointless here (would pay off on a CUDA backend). The ~46–52% MFU gap on this M4 Pro
+is **not** bf16-recoverable — fp32 is already near the practical throughput ceiling.
+
 ### Pause / resume (battery etc.)
 ```bash
 pgrep -fl 'train-terminal'    # ⚠ lists BOTH the zsh wrapper AND the real process

@@ -29,38 +29,56 @@ def gelu_tanh(x):
     return 0.5 * x * (1 + mx.tanh(GELU_C * (x + 0.044715 * x * x * x)))
 
 
+# Mixed precision: run the compute-dominant matmuls in bf16 (halves memory
+# traffic → attacks the bandwidth-bound MFU gap) while master weights, LayerNorm,
+# softmax, GELU, loss, and the optimizer all stay fp32. The exported checkpoint is
+# always fp32, so browser inference + the parity gate are unaffected. bf16 has the
+# same exponent range as fp32, so no new overflow risk (the tanh clamp still holds).
+def dense(x, lin, bf16):
+    if bf16:
+        return (x.astype(mx.bfloat16) @ lin.weight.T.astype(mx.bfloat16)).astype(mx.float32) + lin.bias
+    return lin(x)
+
+
+def bmm(a, b, bf16):
+    if bf16:
+        return (a.astype(mx.bfloat16) @ b.astype(mx.bfloat16)).astype(mx.float32)
+    return a @ b
+
+
 class Block(nn.Module):
-    def __init__(self, C, H):
+    def __init__(self, C, H, bf16=False):
         super().__init__()
         self.ln1 = nn.LayerNorm(C)
         self.wq = nn.Linear(C, C); self.wk = nn.Linear(C, C)
         self.wv = nn.Linear(C, C); self.wo = nn.Linear(C, C)
         self.ln2 = nn.LayerNorm(C)
         self.fc = nn.Linear(C, 4 * C); self.proj = nn.Linear(4 * C, C)
-        self.H = H
+        self.H = H; self.bf16 = bf16
 
     def __call__(self, x, mask):
         B, T, C = x.shape
         hd = C // self.H
-        h = self.ln1(x)
-        q = self.wq(h).reshape(B, T, self.H, hd).transpose(0, 2, 1, 3)
-        k = self.wk(h).reshape(B, T, self.H, hd).transpose(0, 2, 1, 3)
-        v = self.wv(h).reshape(B, T, self.H, hd).transpose(0, 2, 1, 3)
-        att = (q @ k.transpose(0, 1, 3, 2)) * (hd ** -0.5) + mask
-        att = mx.softmax(att, axis=-1)
-        y = (att @ v).transpose(0, 2, 1, 3).reshape(B, T, C)
-        x = x + self.wo(y)
-        x = x + self.proj(gelu_tanh(self.fc(self.ln2(x))))
+        h = self.ln1(x)  # LayerNorm in fp32
+        q = dense(h, self.wq, self.bf16).reshape(B, T, self.H, hd).transpose(0, 2, 1, 3)
+        k = dense(h, self.wk, self.bf16).reshape(B, T, self.H, hd).transpose(0, 2, 1, 3)
+        v = dense(h, self.wv, self.bf16).reshape(B, T, self.H, hd).transpose(0, 2, 1, 3)
+        att = bmm(q, k.transpose(0, 1, 3, 2), self.bf16) * (hd ** -0.5) + mask
+        att = mx.softmax(att, axis=-1)  # softmax in fp32
+        y = bmm(att, v, self.bf16).transpose(0, 2, 1, 3).reshape(B, T, C)
+        x = x + dense(y, self.wo, self.bf16)
+        x = x + dense(gelu_tanh(dense(self.ln2(x), self.fc, self.bf16)), self.proj, self.bf16)
         return x
 
 
 class GPT(nn.Module):
-    def __init__(self, V, block, L, H, C):
+    def __init__(self, V, block, L, H, C, bf16=False):
         super().__init__()
         self.wte = nn.Embedding(V, C)
         self.wpe = nn.Embedding(block, C)
-        self.blocks = [Block(C, H) for _ in range(L)]
+        self.blocks = [Block(C, H, bf16) for _ in range(L)]
         self.lnf = nn.LayerNorm(C)
+        self.bf16 = bf16
 
     def __call__(self, idx):
         B, T = idx.shape
@@ -68,7 +86,7 @@ class GPT(nn.Module):
         mask = mx.triu(mx.full((T, T), -1e9), k=1)
         for blk in self.blocks:
             x = blk(x, mask)
-        return self.lnf(x) @ self.wte.weight.T  # tied head
+        return bmm(self.lnf(x), self.wte.weight.T, self.bf16)  # tied head
 
 
 def gpt2_init(model, L):
@@ -143,6 +161,7 @@ def main():
     ap.add_argument("--out", default="models/terminal-mlx.bity")
     ap.add_argument("--seed", type=int, default=1337)
     ap.add_argument("--parity", default=None, help="init+export only, dump logits for a fixed prompt to this json (cross-impl parity gate)")
+    ap.add_argument("--bf16", action="store_true", help="mixed precision: bf16 matmuls, fp32 master/LayerNorm/softmax/optimizer")
     a = ap.parse_args()
 
     mx.random.seed(a.seed)
@@ -156,7 +175,7 @@ def main():
     V = len(vocab)
     cfg = {"vocabSize": V, "blockSize": a.block, "nLayer": a.layers, "nHead": a.heads, "nEmbd": a.dim}
 
-    model = GPT(V, a.block, a.layers, a.heads, a.dim)
+    model = GPT(V, a.block, a.layers, a.heads, a.dim, bf16=a.bf16)
     gpt2_init(model, a.layers)
     mx.eval(model.parameters())
 
@@ -170,7 +189,7 @@ def main():
         return
     nparams = sum(p.size for _, p in _flat(model.parameters()))
     print(f"corpus {len(text)/1e6:.2f}M chars, vocab {V} | model {a.layers}L/{a.heads}H/{a.dim}d "
-          f"-> {nparams:,} params | engine: MLX/Metal")
+          f"-> {nparams:,} params | engine: MLX/Metal {'(bf16 matmuls)' if a.bf16 else '(fp32)'}")
 
     warmup = min(200, a.steps // 10)
     sched = optim.join_schedules(
