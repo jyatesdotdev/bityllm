@@ -219,18 +219,26 @@ def main():
         return loss
 
     T = a.block
-    hi = len(ids) - T - 1
+    # hold out ~5% of the token stream as validation (the corpus is shuffled at
+    # session granularity, so a tail slice is representative) — lets us watch the
+    # train-vs-val gap and actually diagnose overfitting.
+    n_val = max(T + 1, len(ids) // 20)
+    val_ids, ids = ids[-n_val:], ids[:-n_val]
+    hi, hi_val = len(ids) - T - 1, len(val_ids) - T - 1
 
-    def batch():
-        s = rng.integers(0, hi, size=a.batch)
-        x = np.stack([ids[i:i + T] for i in s])
-        y = np.stack([ids[i + 1:i + 1 + T] for i in s])
+    def sample(arr, top):
+        s = rng.integers(0, top, size=a.batch)
+        x = np.stack([arr[i:i + T] for i in s])
+        y = np.stack([arr[i + 1:i + 1 + T] for i in s])
         return mx.array(x), mx.array(y)
+
+    def est_loss(arr, top, n=25):  # mean loss over n random batches, no grad
+        return sum(loss_fn(model, *sample(arr, top)).item() for _ in range(n)) / n
 
     t0 = time.time()
     tick, tick_t = 0, time.time()
     for it in range(1, a.steps + 1):
-        x, y = batch()
+        x, y = sample(ids, hi)
         loss = step(x, y)
         lr = opt.learning_rate  # decoupled weight decay, 2-D matmul weights only
         for lin in decay_linears:
@@ -242,6 +250,8 @@ def main():
             print(f"step {it:5d}  loss {loss.item():.4f}  {tick/dt:,.0f} tok/s")
             tick, tick_t = 0, time.time()
         if it % max(1, a.steps // 10) == 0 or it == a.steps:
+            tr, vl = est_loss(ids, hi), est_loss(val_ids, hi_val)
+            print(f"  == eval @ {it}: train {tr:.4f}  val {vl:.4f}  gap {vl - tr:+.4f} ==")
             export_bity1(model, vocab, cfg, it, a.out)
 
     print(f"\ndone in {(time.time()-t0)/60:.1f} min -> {a.out}")

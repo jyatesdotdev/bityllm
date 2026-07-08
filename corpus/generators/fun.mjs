@@ -103,13 +103,28 @@ export function* funGen(rng) {
       }
     } else if (r < 0.62) {
       const v = rng.random();
-      if (v < 0.5) yield rec(`sudo ${pick(rng, ["apt update", "reboot", "cat /etc/shadow", "systemctl restart ssh"])}`,
+      if (v < 0.4) yield rec(`sudo ${pick(rng, ["apt update", "reboot", "cat /etc/shadow", "systemctl restart ssh"])}`,
         "[sudo] password for guest: \nguest is not in the sudoers file.  This incident will be reported.");
-      else yield rec(`${pick(rng, ["cat /etc/shadow", "ls /root", "touch /etc/x"])}`,
+      else if (v < 0.7) yield rec(`${pick(rng, ["cat /etc/shadow", "ls /root", "touch /etc/x"])}`,
         pick(rng, ["cat: /etc/shadow: Permission denied", "ls: cannot open directory '/root': Permission denied", "touch: cannot touch '/etc/x': Permission denied"]));
+      else if (v < 0.85) {
+        // unprivileged-guest persona: can't install, can't touch hardware sensors
+        const [cmd, out] = pick(rng, [
+          ["apt install cowsay", "E: Could not open lock file /var/lib/dpkg/lock-frontend - open (13: Permission denied)\nE: Unable to acquire the dpkg frontend lock (/var/lib/dpkg/lock-frontend), are you root?"],
+          ["pip install requests", "error: externally-managed-environment\n\nThis environment is externally managed. To install Python packages\nsystem-wide, try apt install python3-xyz. See PEP 668 for details."],
+          ["sensors", "No sensors found!\nMake sure you loaded all the kernel drivers you need.\nTry sensors-detect to find out which these are."],
+        ]);
+        yield rec(cmd, out);
+      } else {
+        // executable-bit family: ./script needs chmod +x first
+        const s = pick(rng, ["./run.sh", "./deploy.sh", "./build.sh", "./start.sh"]);
+        yield rec(s, `bash: ${s}: Permission denied`);
+      }
     } else if (r < 0.82) {
-      const t = pick(rng, TYPOS);
-      yield rec(t, `bash: ${t}: command not found`);
+      const v = rng.random();
+      if (v < 0.75) { const t = pick(rng, TYPOS); yield rec(t, `bash: ${t}: command not found`); }
+      else yield rec(`echo ${pick(rng, ["hello )", "'unterminated", "hi | "])}`,
+        pick(rng, ["bash: syntax error near unexpected token `)'", "bash: unexpected EOF while looking for matching `''", "bash: syntax error near unexpected token `|'"]));
     } else if (r < 0.9) {
       yield rec("history", history(rng));
     } else if (r < 0.96) {

@@ -47,17 +47,41 @@ function log(rng) {
   return out.join("\n").trimEnd();
 }
 
+// toolchain version banners — stable strings a user's first move always hits
+const VERSIONS = [
+  ["git --version", "git version 2.47.2"],
+  ["node -v", "v20.19.4"],
+  ["node --version", "v20.19.4"],
+  ["npm --version", "10.8.2"],
+  ["npm -v", "10.8.2"],
+  ["python3 --version", "Python 3.13.5"],
+  ["python -V", "Python 3.13.5"],
+  ["pip3 --version", "pip 25.0.1 from /usr/lib/python3/dist-packages/pip (python 3.13)"],
+  ["make --version", "GNU Make 4.4.1\nBuilt for aarch64-unknown-linux-gnu\nCopyright (C) 1988-2023 Free Software Foundation, Inc."],
+  ["gcc --version", "gcc (Debian 14.2.0-8) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."],
+  ["tsc --version", "Version 5.7.3"],
+  ["deno --version", "deno 2.1.4 (stable, release, aarch64-apple-darwin)\nv8 13.0.245.12-rusty\ntypescript 5.6.2"],
+];
+
 export function* gitGen(rng) {
   for (;;) {
     const r = rng.random();
-    if (r < 0.4) yield rec("git status", status(rng));
-    else if (r < 0.6) yield rec(chance(rng, 0.5) ? "git log" : "git log --oneline -5",
+    if (r < 0.34) yield rec("git status", status(rng));
+    else if (r < 0.5) yield rec(chance(rng, 0.5) ? "git log" : "git log --oneline -5",
       chance(rng, 0.5) ? log(rng) : Array.from({ length: 5 }, () => `${hash(rng)} ${pick(rng, MSGS)}`).join("\n"));
-    else if (r < 0.75) yield rec("git branch", BRANCHES.map((b, i) => (i === 0 ? `* ${b}` : `  ${b}`)).join("\n"));
-    else if (r < 0.85) yield rec("git diff --stat",
+    else if (r < 0.62) yield rec("git branch", BRANCHES.map((b, i) => (i === 0 ? `* ${b}` : `  ${b}`)).join("\n"));
+    else if (r < 0.72) yield rec("git diff --stat",
       Array.from({ length: randint(rng, 1, 3) }, () => ` ${pick(rng, FILES).padEnd(22)} | ${randint(rng, 1, 40)} ${"+".repeat(randint(rng, 1, 8))}${"-".repeat(randint(rng, 0, 4))}`).join("\n") +
       `\n ${randint(rng, 1, 3)} file${chance(rng, 0.5) ? "s" : ""} changed, ${randint(rng, 2, 80)} insertions(+), ${randint(rng, 0, 30)} deletions(-)`);
-    else if (r < 0.93) yield rec("git pull", chance(rng, 0.6) ? "Already up to date." : `Updating ${hash(rng)}..${hash(rng)}\nFast-forward\n ${pick(rng, FILES)} | ${randint(rng, 2, 30)} ++++----\n 1 file changed`);
+    else if (r < 0.8) {
+      // version banners (git + the toolchain)
+      const [cmd, out] = pick(rng, VERSIONS);
+      yield rec(cmd, out);
+    } else if (r < 0.87) {
+      // git commit -m — plausible hash + change summary
+      const files = randint(rng, 1, 3), ins = randint(rng, 2, 60), del = randint(rng, 0, 20);
+      yield rec(`git commit -m "${pick(rng, MSGS)}"`, `[${pick(rng, BRANCHES)} ${hash(rng)}] ${pick(rng, MSGS)}\n ${files} file${files > 1 ? "s" : ""} changed, ${ins} insertion${ins > 1 ? "s" : ""}(+)${del ? `, ${del} deletion${del > 1 ? "s" : ""}(-)` : ""}`);
+    } else if (r < 0.94) yield rec("git pull", chance(rng, 0.6) ? "Already up to date." : `Updating ${hash(rng)}..${hash(rng)}\nFast-forward\n ${pick(rng, FILES)} | ${randint(rng, 2, 30)} ++++----\n 1 file changed`);
     else yield rec("git push", chance(rng, 0.5) ? "Everything up-to-date" : `To github.com:guest/bityllm.git\n   ${hash(rng)}..${hash(rng)}  main -> main`);
   }
 }

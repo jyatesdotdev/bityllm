@@ -3,9 +3,15 @@
 
 import { pick, randint, chance, longDate, clock, KERNELS, rec } from "./lib.mjs";
 
+const PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games";
+const VARS = { USER: "guest", LOGNAME: "guest", SHELL: "/bin/bash", HOSTNAME: "bity", HOME: "/home/guest", PWD: "/home/guest", UID: "1000", LANG: "en_US.UTF-8", TERM: "xterm-256color", EDITOR: "vim", PATH };
+const ENV = ["SHELL=/bin/bash", "PWD=/home/guest", "LOGNAME=guest", "HOME=/home/guest", "LANG=en_US.UTF-8", "TERM=xterm-256color", "USER=guest", "SHLVL=1", `PATH=${PATH}`, "EDITOR=vim", "HOSTNAME=bity", "_=/usr/bin/env"].join("\n");
+const EXIT = [["true; echo $?", "0"], ["false; echo $?", "1"], ["[ 1 = 1 ]; echo $?", "0"], ["[ 1 = 2 ]; echo $?", "1"], ["ls > /dev/null; echo $?", "0"]];
+const ALIASES = "alias l='ls -CF'\nalias la='ls -A'\nalias ll='ls -alF'";
+
 function uptimeStr(rng) {
   const days = randint(rng, 0, 40);
-  const users = randint(rng, 0, 3);
+  const users = randint(rng, 1, 3); // who/w always show you → never 0 users
   const load = () => (rng.random() * 2.5).toFixed(2);
   const up = days > 0 ? `${days} day${days > 1 ? "s" : ""}, ${randint(rng, 0, 24)}:${String(randint(rng, 0, 60)).padStart(2, "0")}` : `${randint(rng, 1, 59)} min`;
   return ` ${clock(rng)} up ${up},  ${users} user${users === 1 ? "" : "s"},  load average: ${load()}, ${load()}, ${load()}`;
@@ -91,12 +97,32 @@ export function* sysGen(rng) {
       else if (v < 0.7) yield rec("arch", k.arch);
       else yield rec("cat /etc/debian_version", "13.1");
     } else if (r < 0.95) {
-      if (chance(rng, 0.15)) {
+      const v = rng.random();
+      if (v < 0.12) {
         yield rec(pick(rng, ["exit", "logout"]), "logout");
-      } else {
-        const msg = pick(rng, ["hello", "hello world", "test", "$HOME", "$((6 * 7))", "done", "it works"]);
-        const out = msg === "$HOME" ? "/home/guest" : msg === "$((6 * 7))" ? "42" : msg;
+      } else if (v < 0.34) {
+        const msg = pick(rng, ["hello", "hello world", "test", "$HOME", "$((6 * 7))", "done", "it works", "$USER", "$SHELL"]);
+        const out = msg === "$HOME" ? "/home/guest" : msg === "$((6 * 7))" ? "42" : msg === "$USER" ? "guest" : msg === "$SHELL" ? "/bin/bash" : msg;
         yield rec(`echo ${msg}`, out);
+      } else if (v < 0.52) {
+        // echo $VAR — every var consistent with env/printenv
+        const name = pick(rng, Object.keys(VARS));
+        yield rec(`echo $${name}`, VARS[name]);
+      } else if (v < 0.68) {
+        if (chance(rng, 0.45)) yield rec("env", ENV);
+        else { const name = pick(rng, ["HOME", "USER", "SHELL", "PATH", "PWD", "LANG", "TERM", "EDITOR", "HOSTNAME"]); yield rec(`printenv ${name}`, VARS[name]); }
+      } else if (v < 0.82) {
+        const [cmd, out] = pick(rng, EXIT); // exit codes
+        yield rec(cmd, out);
+      } else if (v < 0.92) {
+        if (chance(rng, 0.5)) yield rec("alias", ALIASES);
+        else {
+          const [cmd, out] = pick(rng, [["type cd", "cd is a shell builtin"], ["type ll", "ll is aliased to `ls -alF'"], ["type ls", "ls is /usr/bin/ls"], ["type python3", "python3 is /usr/bin/python3"], ["type git", "git is /usr/bin/git"], ["type nosuch", "bash: type: nosuch: not found"]]);
+          yield rec(cmd, out);
+        }
+      } else {
+        const c = pick(rng, ["ls", "git", "python3", "curl", "node", "cat", "grep", "cowsay"]);
+        yield rec(`which ${c}`, `/usr/bin/${c}`);
       }
     } else {
       yield rec("ps aux", psAux(rng));
