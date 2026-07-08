@@ -127,6 +127,28 @@ deno run --allow-read --allow-write examples/train-terminal-gpu.ts \
   range guards (`clamp(u, -15, 15)`); the clip kernel must zero grads on
   non-finite norms or one inf cascades to a fully-NaN model in 2 steps.
 
+### MLX (Apple Silicon fast path) — ~15× faster than our WebGPU trainer
+The from-scratch WebGPU trainer is the canonical/educational one; MLX is an
+optional backend that trains the SAME architecture with Apple's fused Metal
+kernels. "The checkpoint is the contract" — it emits our exact `bity1` format,
+so browser inference is unchanged.
+```bash
+uv venv .venv && uv pip install --python .venv/bin/python mlx numpy   # one-time
+.venv/bin/python train/mlx_train.py --steps 16000 --batch 32 --block 128 \
+  --lr 6e-4 --layers 6 --heads 6 --dim 384 --out models/terminal-mlx.bity
+```
+- **~46,500 tok/s on an M4 Pro** (vs ~3,000 for WebGPU) → the 6 h mini run
+  becomes **~24 min**. The naive WGSL kernels, not the silicon, were the ceiling.
+- **Fidelity (or exported weights won't evaluate right in the TS engine):**
+  tanh-approx GELU, tied LM head, LayerNorm eps 1e-5, and MLX `nn.Linear`
+  stores `[out,in]` → transpose to our `[in,out]` on export. Reuses the
+  canonical vocab from an existing checkpoint (`--vocab-from`).
+- **Parity gate:** `python train/mlx_train.py --parity /tmp/p.json --out /tmp/p.bity`
+  then a Node forward on the same weights — verified **max Δlogit 1.2e-6**,
+  argmax agrees. That's what proves the format/transpose/GELU mapping.
+- Minor deviation from the TS trainer: MLX AdamW decays all params (ours
+  excludes 1-D biases/LayerNorm/embeddings) — negligible for this model.
+
 ### Pause / resume (battery etc.)
 ```bash
 pgrep -fl 'train-terminal'    # ⚠ lists BOTH the zsh wrapper AND the real process
