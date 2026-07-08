@@ -1,8 +1,8 @@
 // Comprehensive scored evaluation of a bity checkpoint. Multiple seeds per case;
 // pass-rate where the answer is checkable, copy-fidelity where it's fuzzy.
 import { readFileSync } from "node:fs";
-import { deserialize } from "./src/io/checkpoint.ts";
-import { InferenceSession } from "./src/infer/session.ts";
+import { deserialize } from "../src/io/checkpoint.ts";
+import { InferenceSession } from "../src/infer/session.ts";
 
 const path = process.argv[2] ?? "models/terminal-mini-v7.bity";
 const { model, tok, step } = deserialize(readFileSync(path));
