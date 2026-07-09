@@ -2,7 +2,9 @@
 
 > A tiny GPT you **train from scratch** in **pure TypeScript** with **zero runtime dependencies**, that ships to the **browser** for **cheap, streaming inference** — powering a **virtual terminal** whose "binaries" (`ping`, `reboot`, `fortune`, …) are hallucinated by the model.
 
-Status: **Draft v3** · Train: Node ≥ 22 (dev on v26) · Run: modern browsers (and Node) · License: MIT
+Status: **Draft v4** · Train: Node ≥ 26 (canonical) · GPU via Deno/WebGPU · fast path via Python/MLX · Run: modern browsers (and Node) · License: MIT
+
+> **v4 note.** The v1–v3 design below shipped. This revision folds in the findings that came *after* v1 — a second training backend (MLX, §15.1), the corpus-v8 coverage audit and the data-vs-capacity lesson (§2.4, §9.4), the measured zero-overfitting result (§12), and the in-browser model-selector (§2.5). They are integrated where they belong rather than bolted on as an appendix; each is a decision or a measured result, not a how-to (that's `RUNBOOK.md`).
 
 ---
 
@@ -95,6 +97,26 @@ Char-level + ASCII keeps vocab ~100. The corpus is the **union of many example t
 - **Normalization.** Strip most ANSI for v1 (smaller vocab; the DOM adds styling). Keep the prompt string **exact and consistent** — it's the model's primary anchor and the universal stop-sequence.
 - Even ~2–8 MB across the binary set is plenty for a nano/micro char model. **The binary set and its generators are the biggest levers on quality and fun** — the core of M4.
 
+### 2.4 Coverage audit — and the data-vs-capacity lesson (corpus v8)
+
+The corpus grew by **auditing coverage adversarially, not by adding whatever felt missing.** For v8 we ran an *exhaustive parallel coverage audit* — seven auditors, one per command category, feeding an adversarial consolidating critic — and let the gaps it surfaced drive the expansion (to ~35 MB). The result broke three behavioral ceilings that had stood for several corpus generations, all at the deployed **10.7M** size:
+
+| Ceiling | Before | After v8 |
+|---|---|---|
+| multi-word content copy — `echo a b c > f; cat f` → `a b c` | 0% | **100%** |
+| nested `cd` — `cd a; cd b; pwd` → deep path | 0% | **100%** |
+| `touch` → empty file — `touch x; cat x` → empty | 0% | **100%** |
+
+> **The lesson (the headline finding).** The multi-word ceiling was **data-coverage, not model capacity.** It *survived a 2.4× scale-up to 25M params unchanged* (three independent models — WebGPU-10.7M, MLX-10.7M, MLX-25M — failed it identically), then **fell to a data fix at 10.7M.** The copy circuit had learned to read back the *first* token because that's all the data ever forced; longer spans were permitted by the architecture but never demanded by the corpus. **The model learns what the data forces, not what it permits.** Scale is necessary but is rarely the cheap lever; coverage usually is.
+
+The same audit caught two real generator **bugs** (the `rm -rf` failsafe was wrongly bound to *all* `rm -rf …` instead of the literal `/`; `cd` emitted a random wrong `errno`) — a reminder that **referential consistency is paramount: a *wrong* corpus addition (a self-contradiction) is worse than a missing one**, because the model will faithfully learn the contradiction. It also broadened breadth: `env`/`printenv`/`echo $VAR`/exit-codes/`alias`/`type`; `curl` response **bodies** (not just headers); `ip a` / `ip route` / `dig`; toolchain version banners (`node -v`, `git --version`, `python3 --version`); `git commit`; and a permission-denied persona family.
+
+### 2.5 Model selector — the size sweep, live in the browser
+
+The terminal **header** shows the running model's name/version, param count, and which inference engine won the load-time race (browser inference races a WebGPU session against the pure-TS CPU one and keeps the winner). Beside it, a retro **CRT-themed "channel" control** flips between a **size sweep** — **micro 2.7M**, **v8 10.7M (default)**, **25M** — all trained on the *same* v8 corpus.
+
+> **Design choice — why ship three sizes instead of one.** The whole project is an argument that a *tiny* model can hold a computer's texture; letting a visitor turn a dial and watch coherence trade against latency in real time makes that argument visceral in a way no table can. Holding the corpus constant across the sweep isolates the one variable (size), and the control doubles as a live proof of **"the checkpoint is the contract"** (§15.1): three differently-sized `bity1` files, one loader, one corpus, zero code changes between them.
+
 ---
 
 ## 3. Design Principles
@@ -106,6 +128,7 @@ Char-level + ASCII keeps vocab ~100. The corpus is the **union of many example t
 5. **Synchronous v1.** Pure-TS & WASM are sync; keep the core sync. WebGPU (async) is isolated to a future backend that awaits once per step (§17).
 6. **Determinism by construction.** One seedable PRNG feeds init, dropout, batching, and sampling. Same seed ⇒ same result.
 7. **Honest sizing.** Presets are chosen so each milestone is feasible on the backend that exists then, and so the deployed model is cheap to download and run (§9.4).
+8. **The checkpoint is the contract.** The `bity1` file — config + tokenizer vocab + weights — is the *only* interface between training and inference. Train in **any** language or framework: if it emits a valid `bity1`, the browser loads it unchanged. This deliberately decouples the trainer from the runtime, and it's what lets a second, ~15× faster trainer (MLX, §15.1) coexist with the canonical from-scratch one without touching a line of the shipped inference path — and what lets the browser size-sweep (§2.5) be three files behind one loader.
 
 ---
 
@@ -266,9 +289,9 @@ Next-token cross-entropy, mean over all `B·T` positions (`y` = `x` shifted left
 | **nano**  | ~0.45 M | ~26 M | cache: **~670 tok/s** · no-cache: ~12 | cache: ~4400 · no-cache: ~77 |
 | **micro** | ~6 M | ~690 M | cache: **~50 tok/s** · no-cache: ~0.4 | cache: ~330 · no-cache: ~3 |
 
-Takeaways: **the KV-cache is what makes it cheap** — it turns per-token cost from `O(params·T)` into `O(params + T·nEmbd)`. **nano-with-cache is effortless** in naive pure TS; **micro needs the cache** to feel interactive (and pacing throttles output anyway). The **deployed default is nano** (sub-MB, snappy); larger presets are stretch goals once faster backends land.
+Takeaways: **the KV-cache is what makes it cheap** — it turns per-token cost from `O(params·T)` into `O(params + T·nEmbd)`. **nano-with-cache is effortless** in naive pure TS; **micro needs the cache** to feel interactive (and pacing throttles output anyway). *Postscript:* the faster backends this section anticipated **did land** (GPU via Deno/WebGPU, then MLX, §15.1), so the deployed default ultimately moved *up* from nano to the **10.7M "v8"** model — the extra capacity buys crisp copy-from-context and referential consistency that nano can't hold — with an in-browser **size-sweep selector** spanning **2.7M → 10.7M → 25M** (§2.5).
 
-> **Capacity note.** One nano model must cover *all* the binaries' output styles. Char-level, stylized, repetitive terminal output compresses well, so nano can likely hold ~15–30 commands' texture — but the binary-set size trades off against model size. We measure per-binary sample quality in M4 and bump to micro (or split models) only if needed.
+> **Capacity note — necessary but rarely the cheap lever.** One model covers *all* the binaries' output styles; char-level, stylized, repetitive terminal output compresses well, so a small model holds a lot of texture. But the sharpest capacity lesson of the project was a *negative* one: the **multi-word content-copy ceiling survived a 2.4× scale-up (10.7M → 25M) unchanged, then fell to a corpus fix at 10.7M** (§2.4). Capacity is a floor, not the dial — once a behavior is *representable*, whether the model exhibits it is usually a question of **whether the data forced it**, not of parameter count. We size by measured per-behavior pass-rates (the `bench/eval.mjs` harness, 8 seeds/case), and reach for more parameters only after coverage is exhausted.
 
 ---
 
@@ -299,7 +322,9 @@ export class Dataset {
   getBatch(split: "train" | "val"): { x: Int32Array /*[B,T]*/; y: Int32Array /*[B,T]*/ };
 }
 ```
-Encode the corpus once into one `Int32Array`; hold out the tail for validation; a batch = `B` random windows of `blockSize+1` (`x` = first `T`, `y` = shifted one), sampled via the seeded PRNG. **First smoke-test corpus: makemore-style names** (learns in seconds). **Real target: the per-binary terminal corpus** (§2.3) — union of synthetic generators over the supported command set, seasoned with recorded transcripts.
+Encode the corpus once into one `Int32Array`; hold out ~5% for validation (shuffled at *session* granularity so the split is representative, not a single tail-slice of one command); a batch = `B` random windows of `blockSize+1` (`x` = first `T`, `y` = shifted one), sampled via the seeded PRNG. **First smoke-test corpus: makemore-style names** (learns in seconds). **Real target: the per-binary terminal corpus** (§2.3) — union of synthetic generators over the supported command set, seasoned with recorded transcripts.
+
+> **Overfitting — measured, not assumed.** Every eval reports the train/val gap. On the deployed v8 run the final gap was **−0.0055** (val *below* train) — i.e. **zero overfitting** despite a small model on 35 MB. This isn't luck: the corpus is dominated by **synthetic-random** examples (RNG-generated filenames and content, §2.3), so a specific string is almost never seen twice. Memorization is structurally unavailable, which *forces* the model onto the rules — copy-from-context, path bookkeeping, byte-accurate metadata — rather than a lookup table. The held-out split is a guardrail; the corpus design is why the guardrail rarely has to fire.
 
 ---
 
@@ -356,6 +381,28 @@ Dependency-free, **safetensors-shaped** so interop stays possible:
 - **Training checkpoints**: f32 weights + optimizer moments + step ⇒ exact resume.
 - **Deployment checkpoints (browser)**: **int8-quantized weights** (per-row scale, optional zero-point) ⇒ ~4× smaller (nano ≈ 0.2 MB). **Dequantize once to f32 at load** — inference compute unchanged, only download shrinks. (int4 / dequant-in-matmul are future options.)
 - Round-trip (f32 and int8) is a required test (§19).
+
+### 15.1 The contract in practice: a second trainer (MLX)
+
+The `bity1` format is not just a serialization detail — it's the **seam between "how the weights were made" and "how they're run"** (principle §3.8). Because the browser only ever sees `bity1`, the trainer is swappable. We have two:
+
+- **The from-scratch WebGPU/WGSL trainer stays canonical and educational** — hand-written autograd and Metal-via-WebGPU kernels are the point of the project.
+- **MLX (`train/mlx_train.py`, Python + Apple MLX/Metal) is an optional *speed path*.** It trains the **same architecture** with Apple's fused Metal kernels at **~46,500 tok/s on an M4 Pro vs ~3,000 for the from-scratch WebGPU trainer (~15×)** — a full 16k-step run drops from **~6 h to ~24 min**. It exists *because of* the contract, not in spite of it: it emits our exact `bity1`, so **inference is byte-for-byte unchanged.** The naive WGSL kernels, not the silicon, were the ceiling the speed path clears.
+
+What the contract *demands* of any second trainer — and why the design holds:
+
+- **Parity is the proof, not a hope.** MLX's forward is checked against the **independent** TypeScript forward on the same exported weights: **max Δlogit 1.2e-6, argmax identical.** Two implementations, written from scratch in two languages, agreeing to ~1e-6 is what certifies that the format/transpose/GELU-approx mapping is exact — and it's the guardrail against a fast trainer that silently drifts from the runtime.
+- **Match the *decisions*, not just the shapes.** The subtle risk is optimizer semantics, not tensor layout. MLX AdamW decays every parameter by default; the TS trainer uses **decoupled 2-D-only weight decay** (embeddings, LayerNorm, and biases excluded). The MLX path replicates that grouping by hand (`weight_decay=0` globally + explicit decay on the block `Linear` weights). It matters: an early decay-*all* version cost points on the fuzziest behaviors — the 2-D-only grouping recovers them. **The checkpoint carries the weights; the trainer must carry the training decisions.**
+- **Same guardrails.** A held-out 5% validation split with train/val gap reporting (§12) rides along, so the speed path can't buy throughput by quietly overfitting.
+
+### 15.2 bf16 — a measured no-op on Apple Silicon (kept, off by default)
+
+`--bf16` runs the **matmuls** in bf16 while **master weights, LayerNorm, softmax, loss, and the optimizer stay fp32**, and the **export stays fp32** — so inference and parity are untouched by design. Measured A/B on an M4 Pro: **+2–4% only** (noise), *not* the 1.5–2× bf16 gives on NVIDIA. The reasoning is the interesting part, and it's a silicon fact, not a bug:
+
+- **Apple GPUs have no tensor cores** — fp32 and bf16 matmul run at similar rates, so there's little compute to reclaim.
+- **The fp32 master defeats the bandwidth argument** — keeping fp32 master weights means casting fp32→bf16 *every forward*, and that traffic roughly cancels the bandwidth a bf16 matmul would have saved.
+
+So bf16 is kept **opt-in and off by default**: it's safe (loss identical to three decimals) but pointless *here*, and would pay off on a CUDA backend. More broadly, **the fp32 MLX trainer is already near the M4 Pro's practical throughput ceiling** — **~46–52% MFU with the GPU pinned at its max clock (1578 MHz, ~22 W)**. The remaining MFU gap is *not* bf16-recoverable; it's the cost of a memory-bound, small-batch workload on a chip without matmul-specialized units. That's why the speed path stops at fused fp32 kernels rather than chasing mixed precision.
 
 ---
 
@@ -518,4 +565,4 @@ await shell.run(line, { write: (s) => term.write(s),     // typewriter render, h
 
 ---
 
-*End of draft v3. Intended order: M0 → M1 (grad-checks) → M2 (overfit) → M3 (train nano on names) → M4 (binary set + per-binary corpus) → M5 (browser virtual terminal — the headline). Everything below the `Backend` seam, and the whole `infer`/shell path's speed, is drop-in optimization, not redesign.*
+*End of draft v4. Intended order: M0 → M1 (grad-checks) → M2 (overfit) → M3 (train nano on names) → M4 (binary set + per-binary corpus) → M5 (browser virtual terminal — the headline). Everything below the `Backend` seam, and the whole `infer`/shell path's speed, is drop-in optimization, not redesign.*

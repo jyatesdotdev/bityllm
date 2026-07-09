@@ -178,8 +178,9 @@ now just an evening's GPU run.
 
 - **~3,500 lines of TypeScript**, zero runtime dependencies, every layer ours:
   tensor → tape → GPT → AdamW → tokenizer → checkpoint → KV-cache → shell → CRT.
-- **Six models** trained end-to-end; throughput journey **150 tok/s → 22,000
-  (CPU) → 9,800 at 16× the model size (GPU)**.
+- **Six models** trained end-to-end; throughput journey **~1,800 tok/s → 22,000
+  (CPU, ~12×) → 9,800 at 16× the model size (GPU)**. (Later: MLX made it 46,500 —
+  see Ch. X.)
 - **Three real bugs**, each now a permanent lesson in the code: an Atomics
   lost-wakeup, a NaN cascade in gradient clipping, and a floating-point cliff
   inside Apple's tanh.
@@ -271,3 +272,171 @@ story in one image: a green CRT, cursor blinking, dreaming of a flower.
 Anyone, anywhere, can now type `mkdir flowers` into a browser tab and watch
 eleven million parameters — trained from a blank TypeScript file, on one
 desk, in three days — remember it.
+
+---
+
+## X. Fifteen times faster, and the checkpoint that made it free
+
+The demo shipped. The runbook was written. And then the project's own founding
+principle came back to collect.
+
+*"The checkpoint is the contract"* had been a design slogan — train anywhere,
+ship the same `bity1`, the browser loads it unchanged. It was time to cash it.
+Apple's **MLX** speaks Metal in fused kernels our hand-written WGSL never could,
+and the temptation was obvious: keep the from-scratch trainer as the canonical,
+educational one — every gate, every op, ours to read — but add an *optional*
+fast path for the runs where we just wanted the weights.
+
+The number was almost rude. The WebGPU trainer managed **~3,000 tok/s** on the
+M4 Pro; MLX did **~46,500** — fifteen times faster, same architecture, same
+10.7M parameters. The six-hour overnight mini run became a **twenty-four-minute**
+coffee break. And the lesson was quietly deflating for the WGSL we'd been so
+proud of: *the naive kernels, not the silicon, had been the ceiling all along.*
+The GPU was never the bottleneck; our GEMM was.
+
+But speed you can't trust is worse than slow you can. So the same discipline
+that gated everything else gated this: MLX runs its forward, exports a `bity1`,
+and the **independent TypeScript engine** — code that shares not a single line
+with MLX — runs its own forward on the identical weights. They agreed to **max
+Δlogit 1.2e-6**, argmax identical on every token. That number is the whole
+contract made auditable: the tanh-approx GELU, the tied LM head, the LayerNorm
+epsilon, and MLX's `[out,in]` Linear layout transposed to our `[in,out]` — all
+of it either lines up to six decimals or it doesn't, and it did. (The script
+also grew a held-out 5% validation split and train/val gap reporting, so a fast
+run still tells you the truth about itself.)
+
+One subtlety earned its own scar. MLX's AdamW decays *every* parameter; our
+trainer, faithfully, decays only the 2-D matmul weights and leaves embeddings,
+LayerNorms, and biases alone. The first MLX run used the framework default and
+paid for it — the fuzziest behaviors quietly regressed (`cat` of an uncreated
+`.csv` went 75%→0%, `mv`→`ls` wobbled). Setting MLX's decay to zero and applying
+decoupled, 2-D-only decay by hand recovered them exactly. A reminder that a
+"backend swap" is only lossless if you swap *all* of it, param groups included.
+
+### The bf16 that wasn't
+
+There was an obvious next lever, and it was a trap. `--bf16`: run the matmuls in
+half precision, keep master weights, LayerNorm, softmax, loss, and optimizer in
+fp32, keep the *export* fp32 so inference and parity never notice. On an NVIDIA
+card this is a free 1.5–2×. We built it, measured it carefully, and got
+**+2–4%** — 10.7M went 45.0k→46.9k tok/s, 25M went 22.3k→22.7k. Noise wearing a
+costume.
+
+The why is pure hardware honesty: **Apple GPUs have no tensor cores.** fp32 and
+bf16 matmuls run at nearly the same rate, so there's no compute to reclaim — and
+keeping an fp32 master means casting fp32→bf16 on every forward, whose memory
+traffic *cancels* the bandwidth the smaller matmul was supposed to save. Loss
+stayed identical to three decimals, so the flag is safe; it's just pointless
+here. We kept it opt-in and off by default, a door left open for a CUDA backend
+that may never come. The fp32 trainer, it turned out, was already sitting near
+the practical ceiling — **~46–52% MFU**, the GPU pinned at its max **1578 MHz**
+clock drawing a steady **~22 W**. There was no faster to find. Correct, elegant,
+measured, shelved — the same verdict the fused mega-kernels earned a chapter
+ago. Retiring good ideas for being empirically pointless was becoming a house
+virtue.
+
+## XI. The wall that scale could not break
+
+Now that a full run cost twenty-four minutes instead of an evening, we could
+finally afford to be greedy — and greed found a wall.
+
+Every model since mini had one stubborn failure. Ask it to copy a *single* token
+from context and it was flawless: `echo hello > f; cat f` gave back `hello`. Ask
+it to copy *more than one* — `echo a b c > f; cat f` — and it returned, with
+total confidence, `a`. The copy circuit read back the first token and stopped.
+It had never been the showpiece bug, but it sat at exactly **0%** across every
+eval, and it would not move.
+
+The obvious diagnosis was capacity: 10.7M parameters, maybe the induction
+circuit just didn't have the width to hold a multi-token span. And now we had
+the throughput to test it properly. We scaled to **25.3M** — `8L/8H/512d`, a
+clean 2.4× — held the corpus and the recipe *constant*, and let MLX churn it out
+in **48 minutes**.
+
+Scale won some things handsomely. `wc -l` line-counting went **0%→100%**;
+`mv`→`ls` went **100%**; every fuzzy case firmed up; the 25M model posted a
+**0.359** val loss and was, by the eval harness, the best-behaved model we'd ever
+trained. It was a genuinely better brain.
+
+And the multi-word wall stood at **0%.** Exactly, insultingly, zero. Three
+independent models now — the WebGPU 10.7M, the MLX 10.7M, and the MLX 25M —
+failed the identical case in the identical way, returning the identical first
+token. When 2.4× the parameters, a *different training framework*, and a better
+validation loss all fail a task the same way, the hypothesis is dead. It was
+never capacity. The circuit read the first token reliably because the data had
+*only ever asked it to.* No example in the corpus had forced a longer copy, so
+no longer copy existed. The wall wasn't in the model. It was in the data, and it
+had been all along.
+
+## XII. Seven auditors and a critic
+
+If the gap was coverage, the fix was to find every gap at once — and by now the
+corpus was too large for one pair of eyes to audit honestly. So we ran it in
+parallel: **seven auditors, one per command category** — filesystem, network,
+git, system, fun, toolchains, errors — each tasked with adversarially hunting
+for what the model *couldn't* do, feeding a single **consolidating critic** whose
+only job was to be meaner than any of them and throw out the false alarms.
+
+It earned its keep immediately by catching two real bugs in our own generators —
+not model failures, *corpus* failures, the worst kind because the model
+faithfully learns them. The `rm -rf` failsafe had been bound to *every* `rm -rf`
+instead of the literal `/` it was meant to guard, so the corpus was teaching the
+model to refuse deletions it should have performed. And `cd` into a missing
+directory emitted a *random* errno instead of the right one — a small lie, but
+the model memorizes lies as eagerly as truths. Both had been quietly poisoning
+behavior for generations.
+
+Then the breadth. The audit turned up whole categories the model had simply
+never seen: `env` / `printenv` / `echo $VAR` and exit codes and `alias` and
+`type`; `curl` that returned a response *body*, not just headers; `ip a` /
+`ip route` / `dig`; the little version liturgy every developer knows by heart
+(`node -v`, `git --version`, `python3 --version`); `git commit`; and a whole
+permission-denied persona family. `fs.mjs` grew a real **nested-path stack** and
+**byte-accurate file metadata** — the kind of consistency where `ls -l`, `wc`,
+and `stat` all report the *same* size because they read the same underlying
+truth — plus `wc`/`head`/`tail`/`chmod` and honest pipes and redirects. The
+corpus reached **35 MB**, and the governing rule was stated plainly:
+**referential consistency is paramount — a *wrong* addition is worse than a
+missing one.** A gap the model routes around; a contradiction it dutifully
+learns.
+
+And then the reckoning. Same 10.7M parameters, same twenty-four-minute MLX run,
+new corpus — and the walls came down. Multi-word content copy (`echo a b c > f;
+cat f` → `a b c`): **0%→100%.** Nested `cd` (`cd a; cd b; pwd` walking to the
+deep path): **0%→100%.** `touch x; cat x` returning a genuinely *empty* file:
+**0%→100%.** The three ceilings that had survived a scale to 25M all fell to a
+*smaller* model on better data. There is no cleaner statement of the whole
+project's central law, so we let the model state it: **it learns what the data
+forces, not what it permits.** Twenty-five million parameters permitted the
+multi-word copy. Only the corpus forced it.
+
+The instrument that adjudicated all of this — `bench/eval.mjs`, **eight seeds
+per case**, grepping for behaviors and reporting cold pass-rates — is the reason
+none of these numbers are vibes. It's what turned "seems better" into 0% and
+100%. And it delivered one last verdict worth framing: a final **train/val gap
+of −0.0055** — validation loss *below* training loss — meaning **zero
+overfitting**, at 35 MB and 10.7M parameters, because a corpus of RNG-generated
+names and contents gives the model nothing to memorize. It can only learn the
+*grammar* of the machine, never a specific answer. The synthetic corpus that
+began as a workaround for having no data turned out to be the thing keeping the
+model honest.
+
+That model — **v8** — is the one now dreaming behind the URL.
+
+## XIII. Turn the channel
+
+One thing was still missing, and it was the most fun. The whole scale saga —
+micro at 2.7M, v8 at 10.7M, the 25M — was invisible to anyone but us, buried in
+eval tables. But the models were *right there*, all three trained on the same v8
+corpus, differing only in mass. So we gave the terminal a dial.
+
+The header now names the brain — version and size, so you know which mind you're
+talking to — and a retro, CRT-appropriate **channel selector** switches between
+the three live: **micro 2.7M**, **v8 10.7M** (the default), and the **25M**.
+Same corpus, same commands, three different amounts of parameter. Type `cowsay`
+on the small one and watch the coherence fray at the edges; flip to the big one
+and watch it snap into focus but pace slower. It is the entire
+capacity-versus-coherence-versus-speed trade of this whole document, turned into
+a knob a stranger can turn in a browser tab.
+
+The lab notebook, finally, made playable.

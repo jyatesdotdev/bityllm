@@ -2,6 +2,8 @@
 // InferenceSession. Model binaries stream conditioned inference with per-binary
 // sampling/pacing; scripted binaries are plain functions; hybrids do both.
 export class Shell {
+    /** the active inference session — swappable so a model change keeps the shell
+     *  (and its knob settings/cwd) intact; see the demo's model selector */
     session;
     registry = new Map();
     /** front-panel overrides (null/"stock" = per-binary settings) */

@@ -68,7 +68,8 @@ memorizes and the checkpoint ships to a browser.
 ## 2. Corpus build (required; runs offline from corpus/data/)
 
 ```bash
-npm run corpus     # = node corpus/build.mjs  → corpus/data/bity.corpus.txt (~13.6 MB)
+npm run corpus     # = node corpus/build.mjs  → corpus/data/bity.corpus.txt
+# corpus v8 is ~35 MB; `node corpus/build.mjs --synth-mb 30` sets the synthetic target
 ```
 - ~68% synthetic (generators in `corpus/generators/`: fs, sys, net, git, fun,
   **fs-session** — stateful mkdir/touch/rm → ls blocks) + ~32% real captures,
@@ -165,6 +166,13 @@ Ceiling experiment holding corpus + recipe constant, scaling only params
   not just parameters.
 - nested `cd`, touch→empty stay 0% — pure **corpus gaps** (never taught), not
   capacity; scale can't add what the data omits.
+
+**Sequel — corpus v8 broke all three (the fix).** An exhaustive coverage audit
+(see the model zoo §7 + `corpus/COVERAGE_SPEC.md`) added dense multi-word
+write→read round-trips, a nested-`cd` path stack, and touch→empty drills. At
+**10.7M** params, multi-word content copy, nested `cd`, and touch→empty all went
+**0% → 100%** — confirming coverage, not capacity. The "held at 0%" above is what
+v8 subsequently overturned; the deployed model is v8.
 
 ### bf16 mixed precision (`--bf16`) — measured no-op on Apple Silicon
 `--bf16` runs the matmuls in bf16; master weights, LayerNorm, softmax, loss, and

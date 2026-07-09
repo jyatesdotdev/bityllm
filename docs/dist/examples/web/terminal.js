@@ -7,6 +7,14 @@
 // logic lives in src/infer/shell.ts and is unit-tested; this file is DOM glue.
 import { deserialize, InferenceSession, GPUInferenceSession, Shell, BINARIES, completeCommand, History } from "../../src/infer.js";
 const PROMPT = "guest@bity:~$ ";
+// the MODEL knob sweeps these (all corpus v8) — watch size trade coherence for speed
+const MODELS = [
+    { label: "MICRO", note: "2.7M", file: "terminal-micro-v8.int8.bity" },
+    { label: "MINI", note: "10.7M", file: "terminal.int8.bity" },
+    { label: "MAX", note: "25M", file: "terminal-25m-v8.int8.bity" },
+    { label: "ULTRA", note: "57M", file: "terminal-ultra-v8.int8.bity" }, // wide → WebGPU wins here
+];
+const DEFAULT_MODEL = 1; // MINI (the deployed default)
 const textEl = document.getElementById("text");
 const ghostEl = document.getElementById("ghost");
 const crt = document.getElementById("crt");
@@ -31,21 +39,14 @@ function withLock(fn) {
     lock = r.catch(() => { });
     return r;
 }
-async function main() {
-    io.write("loading model");
-    const tick = setInterval(() => io.write("."), 180);
-    // page-relative first (GitHub Pages: docs/terminal.int8.bity), repo-root fallback (local dev)
-    let res = await fetch("terminal.int8.bity");
+async function loadModel(file) {
+    let res = await fetch(file);
     if (!res.ok)
-        res = await fetch("/models/terminal.int8.bity");
-    if (!res.ok) {
-        clearInterval(tick);
-        io.write(`\nfailed to load terminal.int8.bity (${res.status})\nrun: node examples/export-int8.ts\n`);
-        return;
-    }
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    const { model, tok, step } = deserialize(bytes);
-    // engine selection: race WebGPU vs CPU for 24 tokens, keep the winner
+        res = await fetch("/models/" + file); // repo-root fallback (local dev)
+    if (!res.ok)
+        return null;
+    const buf = new Uint8Array(await res.arrayBuffer());
+    const { model, tok, step } = deserialize(buf);
     const race = async (s) => {
         s.feed("guest@bity:~$ ls\n");
         const t0 = performance.now();
@@ -56,28 +57,54 @@ async function main() {
         s.reset();
         return rate;
     };
+    // untimed warmup: pay WebGPU's one-time shader/pipeline compilation (and prime
+    // CPU caches) BEFORE the timed race, so the GPU isn't penalized for cold-start.
+    const warm = async (s) => {
+        s.feed("guest@bity:~$ ls\n");
+        for await (const _ of s.stream({ maxNewTokens: 8, temperature: 0.8, seed: 1 })) { /* discard */ }
+        s.reset();
+    };
     let session = new InferenceSession(model, tok);
     let engine = "cpu (pure TS)";
     try {
         const gpuS = await GPUInferenceSession.create(model, tok);
+        await warm(gpuS);
+        await warm(session);
         const gRate = await race(gpuS);
         const cRate = await race(session);
         if (gRate > cRate) {
             session = gpuS;
-            engine = `webgpu ${gRate.toFixed(0)} tok/s (cpu: ${cRate.toFixed(0)})`;
+            engine = `webgpu ${gRate.toFixed(0)} tok/s (cpu ${cRate.toFixed(0)})`;
         }
         else {
             gpuS.destroy();
-            engine = `cpu ${cRate.toFixed(0)} tok/s (webgpu: ${gRate.toFixed(0)})`;
+            engine = `cpu ${cRate.toFixed(0)} tok/s (webgpu ${gRate.toFixed(0)})`;
         }
     }
-    catch {
-        /* no WebGPU in this browser — CPU it is */
+    catch { /* no WebGPU in this browser — CPU it is */ }
+    return { session, engine, model, step, kb: Math.round(buf.length / 1024) };
+}
+const banner = (m, l) => `bity 0.1 · model: ${m.label} (${m.note} params, v8, step ${l.step}) · ${l.kb} KB int8 · engine: ${l.engine}\n` +
+    `nothing below this line is real. type 'help' for the binaries it dreams best. turn the MODEL knob to swap brains.\n\n`;
+async function main() {
+    const saved = parseInt(localStorage.getItem("bity.model") ?? "", 10);
+    let modelIdx = saved >= 0 && saved < MODELS.length ? saved : DEFAULT_MODEL;
+    io.write("loading model");
+    const tick = setInterval(() => io.write("."), 180);
+    let loaded = await loadModel(MODELS[modelIdx].file);
+    if (!loaded && modelIdx !== DEFAULT_MODEL) {
+        modelIdx = DEFAULT_MODEL;
+        loaded = await loadModel(MODELS[modelIdx].file);
     }
     clearInterval(tick);
+    if (!loaded) {
+        io.write(`\nfailed to load ${MODELS[modelIdx].file}\nrun: node examples/export-int8.ts\n`);
+        return;
+    }
     io.clear();
-    io.write(`bity 0.1 — a hallucinated terminal (${(bytes.length / 1024).toFixed(0)} KB model, ${model.paramCount().toLocaleString()} params, step ${step}, engine: ${engine})\n`);
-    io.write(`nothing below this line is real. type 'help' for the binaries it dreams best.\n\n`);
+    let session = loaded.session;
+    let model = loaded.model;
+    io.write(banner(MODELS[modelIdx], loaded));
     const shell = new Shell(session, { prompt: PROMPT });
     shell.register(...BINARIES);
     const commandNames = [...shell.registry.keys()].sort();
@@ -155,6 +182,40 @@ async function main() {
         scheduleGhost();
     };
     io.write(shell.prompt);
+    // ---- model selector: swap the brain in place, keeping the shell + knob settings ----
+    let switching = false;
+    async function switchModel(idx) {
+        if (idx === modelIdx || switching)
+            return;
+        switching = true;
+        await withLock(async () => {
+            suggestGen++;
+            setGhost("");
+            line = "";
+            io.clear();
+            io.write(`tuning to ${MODELS[idx].label}`);
+            const t = setInterval(() => io.write("."), 180);
+            const next = await loadModel(MODELS[idx].file);
+            clearInterval(t);
+            if (!next) {
+                io.clear();
+                io.write(`could not load ${MODELS[idx].label} (${MODELS[idx].file})\n${shell.prompt}`);
+                return;
+            }
+            shell.session.destroy?.(); // free the old GPU session
+            shell.session = next.session;
+            shell.cwd = "~";
+            session = next.session;
+            model = next.model;
+            modelIdx = idx;
+            localStorage.setItem("bity.model", String(idx));
+            shell.session.feed(shell.prompt);
+            io.clear();
+            io.write(banner(MODELS[idx], next));
+            io.write(shell.prompt);
+        });
+        switching = false;
+    }
     const knob = (id, positions, start, persist) => {
         const el = document.getElementById(id);
         const dial = el.querySelector(".dial");
@@ -181,6 +242,11 @@ async function main() {
         });
         render();
     };
+    // MODEL: cycles the size lineup (micro → mini → max), swapping the brain in place
+    knob("k-model", MODELS.map((m, i) => ({
+        label: m.label, rot: -42 + i * (84 / (MODELS.length - 1)), led: true,
+        apply: () => { void switchModel(i); },
+    })), modelIdx, "bity.model");
     let everBooted = false;
     knob("k-power", [
         {

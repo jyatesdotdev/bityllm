@@ -46,7 +46,9 @@ export interface Binary {
 }
 
 export class Shell {
-  readonly session: SessionLike;
+  /** the active inference session — swappable so a model change keeps the shell
+   *  (and its knob settings/cwd) intact; see the demo's model selector */
+  session: SessionLike;
   readonly registry = new Map<string, Binary>();
   /** front-panel overrides (null/"stock" = per-binary settings) */
   tempOverride: number | null = null;
