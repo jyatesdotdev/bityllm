@@ -254,8 +254,10 @@ numbers disappoint.
 | `models/terminal-micro-v5.bity` | 2.7M | corpus v5 (16k, GPU) | universal copy: mkdir flowers → ls shows flowers |
 | `models/terminal-mini.bity` | 10.7M | corpus v5 @ 22.8MB (16k, GPU, 6h) | crisp copier (echo xk4vw9 ✓), perfect cowsay, IP-consistent ping |
 | `models/terminal-mini-v6.bity` | 10.7M | corpus v6 (16k, GPU, 6h) | filesystem consistency: mv/rm/pwd, echo>file read-back, cat-after-rm ENOENT |
-| `models/terminal-mini-v7.bity` | 10.7M | corpus v7 (16k, GPU, 6h) | **persistent location: `cd` walks the tree, prompt carries the path (`~/projects$`), per-dir `ls`; `wc -l`, `which`.** Ceiling: multi-word `cat` content copy still first-word (0% at 11M → capacity, scale trigger). Audit: `node bench/eval.mjs` |
-| `models/terminal.int8.bity` | — | — | **currently deployed: mini-v7** |
+| `models/terminal-mini-v7.bity` | 10.7M | corpus v7 (16k, GPU, 6h) | persistent location: `cd` walks the tree, prompt carries the path, per-dir `ls`; `wc -l`, `which`. Ceiling: multi-word `cat` first-word only |
+| `models/terminal-25m.bity` | 25.3M | corpus v7 (16k, MLX, 48m) | scale test: broke `wc -l`/`mv`, but multi-word content STILL 0% → proved it's coverage, not capacity |
+| `models/terminal-v8.bity` | 10.7M | corpus v8 @ 35MB (16k, MLX, 24m) | **exhaustive coverage: multi-word content 100%, nested `cd` 100%, touch→empty 100%; env/curl-body/ip-a/version-banners; val gap −0.0055 (no overfitting)** |
+| `models/terminal.int8.bity` | — | — | **currently deployed: v8** |
 
 Checkpoint format (`bity1`): `[u32 headerLen][JSON header][raw f32/i8 blobs]` —
 config + tokenizer vocab travel inside; `deserialize()` handles f32 and int8.
