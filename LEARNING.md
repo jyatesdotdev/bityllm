@@ -517,7 +517,35 @@ changes.** The "special kind of gradient" people imagine RL needs is a myth — 
 cleverness is entirely in *constructing the reward-weighted scalar and estimating
 advantages*; the differentiation is the same reverse-mode sweep from §4.
 
-### 13f. The one-sentence answer
+### 13f. Is this a tiny ChatGPT?
+
+**Same family, yes; a capable assistant, no — and the gap is not the architecture.**
+bityllm is the *same* decoder-only autoregressive transformer GPT/ChatGPT are built on,
+and its next-token objective is exactly how chat models are pretrained. You can make it
+**dialogue-shaped today** with only a corpus change: format text as `User: … \n
+Assistant: …` turns, add a turn-boundary stop token, train. That reformatting **is**
+instruction tuning (SFT) — next-token prediction on conversation data (optionally masking
+the loss on the prompt tokens, a small weighted-loss tweak like §13e's).
+
+What it will *not* be is **useful** — and every reason is scale/data/recipe, not architecture:
+- **Scale.** ChatGPT-class models are ~10⁹–10¹² params on ~10¹²⁺ tokens; bityllm is 10.7M
+  params on ~28 MB — 5–6 orders of magnitude smaller on *both* axes. A model this small
+  yields locally-plausible text with no facts, memory, or reasoning.
+- **Tokenizer.** Char-level suits a terminal but is inefficient for language — swap in a
+  subword/BPE tokenizer (the `Tokenizer` interface allows it — extension project #5).
+- **Context.** `blockSize` is 128 *characters* (~20 words); a chatbot needs thousands of
+  tokens (bump it, pay the training cost).
+- **Alignment.** Turning a base model into a *helpful* assistant is **SFT → RLHF/DPO**. In
+  this repo's terms: SFT = the training loop on chat data; **RLHF = the policy-gradient
+  machinery from §13e** with a reward model; DPO = a simpler preference-pair loss (no RL
+  loop). Same recipe *shapes* you've already seen — only the compute is out of reach.
+
+So: the architecture **and even the training recipes** (SFT, RLHF) match a real chatbot's;
+capability is bought with scale + data + the alignment pipeline, none of which the
+architecture itself provides. What you *can* build here is a toy dialogue generator —
+chatbot-*shaped*, not chatbot-*smart*.
+
+### 13g. The one-sentence answer
 
 > The transformer is the interesting *cap*; the autograd engine, the module tree, the
 > optimizer, the loss-and-loop, the checkpointing — **the ~80% of this repo that isn't
