@@ -7,12 +7,13 @@
 // logic lives in src/infer/shell.ts and is unit-tested; this file is DOM glue.
 import { deserialize, InferenceSession, GPUInferenceSession, Shell, BINARIES, completeCommand, History } from "../../src/infer.js";
 const PROMPT = "guest@bity:~$ ";
-// the MODEL knob sweeps these (all corpus v8) — watch size trade coherence for speed
+// the MODEL knob sweeps these — MINI is the hybrid-corpus v9 (real code owns
+// FS/text, model dreams the rest); the other sizes are still corpus v8
 const MODELS = [
-    { label: "MICRO", note: "2.7M", file: "terminal-micro-v8.int8.bity" },
-    { label: "MINI", note: "10.7M", file: "terminal.int8.bity" },
-    { label: "MAX", note: "25M", file: "terminal-25m-v8.int8.bity" },
-    { label: "ULTRA", note: "57M", file: "terminal-ultra-v8.int8.bity" }, // wide → WebGPU wins here
+    { label: "MICRO", note: "2.7M", ver: "v8", file: "terminal-micro-v8.int8.bity" },
+    { label: "MINI", note: "10.7M", ver: "v9", file: "terminal.int8.bity" },
+    { label: "MAX", note: "25M", ver: "v8", file: "terminal-25m-v8.int8.bity" },
+    { label: "ULTRA", note: "57M", ver: "v8", file: "terminal-ultra-v8.int8.bity" }, // wide → WebGPU wins here
 ];
 const DEFAULT_MODEL = 1; // MINI (the deployed default)
 const textEl = document.getElementById("text");
@@ -84,7 +85,7 @@ async function loadModel(file) {
     catch { /* no WebGPU in this browser — CPU it is */ }
     return { session, engine, model, step, kb: Math.round(buf.length / 1024) };
 }
-const banner = (m, l) => `bity 0.1 · model: ${m.label} (${m.note} params, v8, step ${l.step}) · ${l.kb} KB int8 · engine: ${l.engine}\n` +
+const banner = (m, l) => `bity 0.1 · model: ${m.label} (${m.note} params, ${m.ver}, step ${l.step}) · ${l.kb} KB int8 · engine: ${l.engine}\n` +
     `nothing below this line is real. type 'help' for the binaries it dreams best. turn the MODEL knob to swap brains.\n\n`;
 async function main() {
     const saved = parseInt(localStorage.getItem("bity.model") ?? "", 10);
@@ -107,7 +108,7 @@ async function main() {
     io.write(banner(MODELS[modelIdx], loaded));
     const shell = new Shell(session, { prompt: PROMPT });
     shell.register(...BINARIES);
-    const commandNames = [...shell.registry.keys()].sort();
+    const commandNames = shell.commandNames(); // core + dreamed + registered
     const history = new History();
     let line = "";
     let busy = false;
