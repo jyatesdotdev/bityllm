@@ -55,6 +55,16 @@ test("coreutils: identity + text tools produce real output", () => {
   assert.equal(CORE.grep(["model"], st, "a\nfeed the model\nb").out.trim(), "feed the model");
 });
 
+test("VFS: /proc + /etc system files are seeded and consistent with uname", () => {
+  const st = newState();
+  // /proc/version agrees with uname's kernel identity (referential consistency)
+  assert.match(out(st, "cat /proc/version"), /Debian 6\.12\.74/);
+  assert.match(out(st, "uname -r"), /6\.12\.74/);
+  assert.match(out(st, "cat /proc/cpuinfo"), /processor\s*: 0/);
+  assert.equal(out(st, "cat /etc/fstab"), "# UNCONFIGURED FSTAB FOR BASE SYSTEM");
+  assert.ok(out(st, "ls /proc").split(/\s+/).includes("cpuinfo"), "ls /proc lists the seeded files");
+});
+
 test("executor: pipes thread stdin → stdout", () => {
   const st = newState();
   assert.equal(out(st, "cat notes.txt | grep model | wc -l"), "1");

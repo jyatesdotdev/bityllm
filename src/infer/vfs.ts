@@ -169,6 +169,7 @@ function seed(vfs: VFS): void {
   vfs.mkdir("/tmp", "/", true, "root");
   vfs.mkdir("/var/log", "/", true, "root");
   vfs.mkdir("/usr/bin", "/", true, "root");
+  vfs.mkdir("/proc", "/", true, "root");
 
   add("/home/guest/notes.txt", "remember to feed the model\nbackup corpus to /var/backups\ncheck disk space on friday");
   add("/home/guest/todo.md", "# todo\n- [x] capture corpus\n- [ ] train the model\n- [ ] ship the terminal");
@@ -180,4 +181,24 @@ function seed(vfs: VFS): void {
   add("/etc/debian_version", "13.1\n", "root");
   add("/etc/hosts", "127.0.0.1\tlocalhost\n127.0.1.1\tbity\n", "root");
   add("/etc/passwd", "root:x:0:0:root:/root:/bin/bash\nguest:x:1000:1000:guest:/home/guest:/bin/bash\n", "root");
+  add("/etc/group", "root:x:0:\ndaemon:x:1:\nbin:x:2:\nsys:x:3:\nadm:x:4:\ntty:x:5:\ndisk:x:6:\nsudo:x:27:guest\nusers:x:100:\nguest:x:1000:\n", "root");
+  add("/etc/fstab", "# UNCONFIGURED FSTAB FOR BASE SYSTEM\n", "root");
+  add("/etc/resolv.conf", "nameserver 192.168.1.1\nsearch localdomain\n", "root");
+  add("/etc/issue", "Debian GNU/Linux 13 \\n \\l\n", "root");
+
+  // /proc — static system info, kept consistent with the VFS's Debian 13 /
+  // aarch64 / kernel 6.12.74 identity (so `cat /proc/*` agrees with `uname`).
+  add("/proc/version", "Linux version 6.12.74+deb13+1-cloud-arm64 (debian-kernel@lists.debian.org) (gcc-14 (Debian 14.2.0-3) 14.2.0, GNU ld (GNU Binutils for Debian) 2.43.1) #1 SMP Debian 6.12.74-2 (2025-05-15)\n", "root");
+  const cpu = (n: number): string =>
+    `processor\t: ${n}\nBogoMIPS\t: 48.00\nFeatures\t: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm lrcpc dcpop asimddp\nCPU implementer\t: 0x61\nCPU architecture: 8\nCPU variant\t: 0x0\nCPU part\t: 0x000\nCPU revision\t: 0\n`;
+  add("/proc/cpuinfo", cpu(0) + "\n" + cpu(1) + "\n", "root");
+  add("/proc/meminfo", [
+    "MemTotal:        2006468 kB", "MemFree:          146992 kB", "MemAvailable:    1122824 kB",
+    "Buffers:           68948 kB", "Cached:           844992 kB", "SwapCached:            0 kB",
+    "Active:           520140 kB", "Inactive:        1024036 kB", "SwapTotal:       1000444 kB",
+    "SwapFree:        1000444 kB", "Dirty:               220 kB", "Writeback:             0 kB",
+  ].join("\n") + "\n", "root");
+  add("/proc/loadavg", "0.00 0.02 0.00 1/312 1847\n", "root");
+  add("/proc/uptime", "82835.37 163551.40\n", "root");
+  add("/proc/cmdline", "BOOT_IMAGE=/boot/vmlinuz-6.12.74+deb13+1-cloud-arm64 root=UUID=e7f2a1c4-8b3d-4e6f-9a0b-1c2d3e4f5a6b ro quiet\n", "root");
 }
