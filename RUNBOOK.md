@@ -69,15 +69,25 @@ memorizes and the checkpoint ships to a browser.
 
 ```bash
 npm run corpus     # = node corpus/build.mjs  → corpus/data/bity.corpus.txt
-# corpus v8 is ~35 MB; `node corpus/build.mjs --synth-mb 30` sets the synthetic target
+# hybrid corpus is ~28.5 MB; `node corpus/build.mjs --synth-mb 9` sets the synthetic target
 ```
-- ~68% synthetic (generators in `corpus/generators/`: fs, sys, net, git, fun,
-  **fs-session** — stateful mkdir/touch/rm → ls blocks) + ~32% real captures,
-  **shuffled at session granularity** so the val split is representative.
-- Key lesson (corpus v3): to teach copy-from-context (mkdir X → ls shows X),
-  use **random names** (memorization impossible) and **append-order listings**
-  (no sorted-insertion program) — mirror how `ping <host>` echoes its argument
-  at a fixed template position.
+- **Hybrid corpus (current):** ~68% **real** captures / ~32% synthetic, **shuffled at
+  session granularity** so the val split is representative. Since the programmatic CORE
+  owns deterministic commands, the corpus trains **only the dreamed set**:
+  - synthetic generators (`corpus/generators/`): `net`, `git`, `fun`, `sysinfo`
+    (df/free/ps/top/lscpu/…), and `unknown` (graceful `command not found`). The old
+    `fs`/`sys`/`copy`/`fs-session` generators are **retired** (unimported).
+  - `build.mjs` **filters CORE-command records out of the real capture** — the model
+    never dreams `ls`/`cat`/`pwd`, so training on them is pure dilution.
+- **Gotcha (2026-07-09):** a graceful-`command not found` generator will POISON any
+  real-but-thinly-captured command unless its positive signal roughly matches the
+  not-found volume. `ps`/`df` (~8–10 capture records each) started returning
+  `command not found` until `sysinfoGen` restored their positive signal and the
+  `unknown` weight was halved. Whenever you drop a generator, check the capture
+  actually covers those commands, or the fallback wins.
+- Key lesson (corpus v3, still true for what the model dreams): teach copy-from-context
+  with **random names** (memorization impossible) and **append-order listings** —
+  mirror how `ping <host>` echoes its argument at a fixed template position.
 
 ---
 
@@ -172,7 +182,8 @@ Ceiling experiment holding corpus + recipe constant, scaling only params
 write→read round-trips, a nested-`cd` path stack, and touch→empty drills. At
 **10.7M** params, multi-word content copy, nested `cd`, and touch→empty all went
 **0% → 100%** — confirming coverage, not capacity. The "held at 0%" above is what
-v8 subsequently overturned; the deployed model is v8.
+v8 subsequently overturned. (Those filesystem behaviors are now **real code** since
+the v9 hybrid pivot — the deployed default is **MINI v9**; see §7 and the DESIGN v5 note.)
 
 ### bf16 mixed precision (`--bf16`) — measured no-op on Apple Silicon
 `--bf16` runs the matmuls in bf16; master weights, LayerNorm, softmax, loss, and
@@ -265,7 +276,13 @@ numbers disappoint.
 | `models/terminal-mini-v7.bity` | 10.7M | corpus v7 (16k, GPU, 6h) | persistent location: `cd` walks the tree, prompt carries the path, per-dir `ls`; `wc -l`, `which`. Ceiling: multi-word `cat` first-word only |
 | `models/terminal-25m.bity` | 25.3M | corpus v7 (16k, MLX, 48m) | scale test: broke `wc -l`/`mv`, but multi-word content STILL 0% → proved it's coverage, not capacity |
 | `models/terminal-v8.bity` | 10.7M | corpus v8 @ 35MB (16k, MLX, 24m) | **exhaustive coverage: multi-word content 100%, nested `cd` 100%, touch→empty 100%; env/curl-body/ip-a/version-banners; val gap −0.0055 (no overfitting)** |
-| `models/terminal.int8.bity` | — | — | **currently deployed: v8** |
+| `models/terminal-mini-v9.bity` | 10.7M | **hybrid corpus** @ 28.5MB (16k, MLX, 24m) | **the hybrid pivot: FS/text/identity are real code, so this trains only the dreamed set. Dreams `ps`/`df`/`free`/`top` correctly; `kubectl`/garbage → clean `command not found`; `git`/`ping` good. train 0.521 / val 0.545 (gap +0.024)** |
+| `models/terminal.int8.bity` | — | — | **currently deployed: MINI v9 (hybrid).** MICRO/MAX/ULTRA in the demo's size sweep are still corpus-v8 (open follow-up: retrain on the hybrid corpus) |
+
+**Programmatic core (v9+):** deterministic commands no longer come from any model —
+`src/infer/vfs.ts` (in-memory FS), `coreutils.ts` (~35 binaries), `shell-exec.ts`
+(pipes/redirects/globs/`&&`), routed ahead of the model in `Shell.run`. See `LEARNING.md`
+and the DESIGN v5 note.
 
 Checkpoint format (`bity1`): `[u32 headerLen][JSON header][raw f32/i8 blobs]` —
 config + tokenizer vocab travel inside; `deserialize()` handles f32 and int8.

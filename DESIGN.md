@@ -1,9 +1,11 @@
 # bityllm — Design Document
 
-> A tiny GPT you **train from scratch** in **pure TypeScript** with **zero runtime dependencies**, that ships to the **browser** for **cheap, streaming inference** — powering a **virtual terminal** whose "binaries" (`ping`, `reboot`, `fortune`, …) are hallucinated by the model.
+> A tiny GPT you **train from scratch** in **pure TypeScript** with **zero runtime dependencies**, that ships to the **browser** for **cheap, streaming inference** — powering a **hybrid terminal**: deterministic commands run as real code over an in-memory filesystem, and generative "binaries" (`ping`, `reboot`, `fortune`, …) are hallucinated by the model.
 
-Status: **Draft v4** · Train: Node ≥ 26 (canonical) · GPU via Deno/WebGPU · fast path via Python/MLX · Run: modern browsers (and Node) · License: MIT
+Status: **Draft v5** · Train: Node ≥ 26 (canonical) · GPU via Deno/WebGPU · fast path via Python/MLX · Run: modern browsers (and Node) · License: MIT
 
+> **v5 note (the hybrid pivot — supersedes the "everything is dreamed" framing below).** The breadth ceiling — the model gibberished outside ~50 commands, and the referential-consistency corpus burden (`ll`/`cat`-after-`rm`) was structural — forced a split. **Deterministic + stateful + must-be-consistent commands are now REAL CODE** (a virtual filesystem `src/infer/vfs.ts`, ~35 coreutils `src/infer/coreutils.ts`, and a mini-shell with pipes/redirects/globs/`&&` `src/infer/shell-exec.ts`), routed ahead of the model in `Shell.run`. The **model is reserved for generative commands** (`ping`/`git`/`ps`/`man`/fun) + a graceful `command not found`. The corpus was rebalanced capture-heavy accordingly (68% real / 32% synthetic; CORE commands filtered out), and the deployed default is now **MINI v9** trained on that corpus. Where §2 below says "every binary is hallucinated," read it as "every *generative* binary." The autograd/training/checkpoint/inference core (§4–§15) is unchanged.
+>
 > **v4 note.** The v1–v3 design below shipped. This revision folds in the findings that came *after* v1 — a second training backend (MLX, §15.1), the corpus-v8 coverage audit and the data-vs-capacity lesson (§2.4, §9.4), the measured zero-overfitting result (§12), and the in-browser model-selector (§2.5). They are integrated where they belong rather than bolted on as an appendix; each is a decision or a measured result, not a how-to (that's `RUNBOOK.md`).
 
 ---
@@ -14,7 +16,7 @@ Status: **Draft v4** · Train: Node ≥ 26 (canonical) · GPU via Deno/WebGPU ·
 - **Educational, from-scratch GPT.** Implement a decoder-only transformer *and* the reverse-mode autograd that trains it. Nothing imported does the "AI" for us.
 - **Zero runtime dependencies.** No tfjs/onnx/BLAS packages. Only Node/Web built-ins.
 - **Cheap browser inference is a primary goal.** The trained model loads and generates **token-by-token, batch-1, in the browser, at interactive latency, in a tiny JS bundle** with **no training code shipped**.
-- **Drives a virtual terminal of hallucinated "binaries".** The end product is a shell whose commands (`ping`, `reboot`, `fortune`, …) are thin wrappers that run **conditioned inference** to stream realistic, fun output. See §2.
+- **Drives a hybrid virtual terminal.** The end product is a shell that routes deterministic commands to real code (a virtual filesystem + coreutils + mini-shell) and *generative* ones (`ping`, `reboot`, `fortune`, …) to thin wrappers that run **conditioned inference** to stream realistic, fun output. See §2 and the v5 note above.
 - **Isomorphic core.** All math/model code runs unchanged in Node (training) and the browser (inference). Platform specifics live behind `Env` adapters.
 - **Correctness first.** Gradients validated by finite-difference checks; the full train path validated by an "overfit one batch" test before any real training.
 - **A pluggable compute backend.** All numerics sit behind one `Backend` interface so WASM SIMD / worker threads / WebGPU can drop in later without touching model code.
@@ -25,7 +27,7 @@ Status: **Draft v4** · Train: Node ≥ 26 (canonical) · GPU via Deno/WebGPU ·
 - No GPU in v1 (WebGPU is a designed-for future backend).
 - No distributed training, no mixed precision, no autograd in the shipped inference bundle.
 - Not loading pretrained GPT-2 weights in v1 (checkpoint format is shaped to allow it later).
-- The terminal is **simulated, not real** — "binaries" hallucinate plausible output; nothing is executed and no real host/network/filesystem is touched.
+- The terminal touches **no real host/network** — no sockets, no subprocesses, no real disk. (Since the v5 hybrid pivot there *is* a real in-memory **virtual** filesystem for FS commands, but it is a sandboxed data structure, not the machine's disk; generative binaries still hallucinate plausible output.)
 
 ### Locked decisions
 | Question | Decision | Consequence |
@@ -113,7 +115,7 @@ The same audit caught two real generator **bugs** (the `rm -rf` failsafe was wro
 
 ### 2.5 Model selector — the size sweep, live in the browser
 
-The terminal **header** shows the running model's name/version, param count, and which inference engine won the load-time race (browser inference races a WebGPU session against the pure-TS CPU one and keeps the winner). Beside it, a retro **CRT-themed "channel" control** flips between a **size sweep** — **micro 2.7M**, **v8 10.7M (default)**, **25M** — all trained on the *same* v8 corpus.
+The terminal **header** shows the running model's name/version, param count, and which inference engine won the load-time race (browser inference races a WebGPU session against the pure-TS CPU one and keeps the winner). Beside it, a retro **CRT-themed "channel" control** flips between a **four-size sweep** — **MICRO 2.7M**, **MINI 10.7M (default)**, **MAX 25M**, **ULTRA 57M** (wide → WebGPU wins). The default MINI is now the **hybrid-corpus v9**; MICRO/MAX/ULTRA remain corpus-v8 (retraining them on the hybrid corpus is an open follow-up).
 
 > **Design choice — why ship three sizes instead of one.** The whole project is an argument that a *tiny* model can hold a computer's texture; letting a visitor turn a dial and watch coherence trade against latency in real time makes that argument visceral in a way no table can. Holding the corpus constant across the sweep isolates the one variable (size), and the control doubles as a live proof of **"the checkpoint is the contract"** (§15.1): three differently-sized `bity1` files, one loader, one corpus, zero code changes between them.
 
@@ -324,7 +326,7 @@ export class Dataset {
 ```
 Encode the corpus once into one `Int32Array`; hold out ~5% for validation (shuffled at *session* granularity so the split is representative, not a single tail-slice of one command); a batch = `B` random windows of `blockSize+1` (`x` = first `T`, `y` = shifted one), sampled via the seeded PRNG. **First smoke-test corpus: makemore-style names** (learns in seconds). **Real target: the per-binary terminal corpus** (§2.3) — union of synthetic generators over the supported command set, seasoned with recorded transcripts.
 
-> **Overfitting — measured, not assumed.** Every eval reports the train/val gap. On the deployed v8 run the final gap was **−0.0055** (val *below* train) — i.e. **zero overfitting** despite a small model on 35 MB. This isn't luck: the corpus is dominated by **synthetic-random** examples (RNG-generated filenames and content, §2.3), so a specific string is almost never seen twice. Memorization is structurally unavailable, which *forces* the model onto the rules — copy-from-context, path bookkeeping, byte-accurate metadata — rather than a lookup table. The held-out split is a guardrail; the corpus design is why the guardrail rarely has to fire.
+> **Overfitting — measured, not assumed.** Every eval reports the train/val gap. On the v8 run the final gap was **−0.0055** (val *below* train) — i.e. **zero overfitting** despite a small model on 35 MB. (The v9 hybrid corpus, being more capture-heavy and diverse, runs a small *positive* gap of **+0.024** — still healthy — because real captures are less repetitive than the synthetic-random v8 corpus.) This isn't luck: the corpus is dominated by **synthetic-random** examples (RNG-generated filenames and content, §2.3), so a specific string is almost never seen twice. Memorization is structurally unavailable, which *forces* the model onto the rules — copy-from-context, path bookkeeping, byte-accurate metadata — rather than a lookup table. The held-out split is a guardrail; the corpus design is why the guardrail rarely has to fire.
 
 ---
 

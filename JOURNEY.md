@@ -440,3 +440,60 @@ capacity-versus-coherence-versus-speed trade of this whole document, turned into
 a knob a stranger can turn in a browser tab.
 
 The lab notebook, finally, made playable.
+
+## XIV. The half that shouldn't dream
+
+The dial was live, the ceilings were broken, and then someone typed `find`.
+
+Gibberish. `docker ps` — gibberish. `tar`, `sed`, `awk`, `man ssh` — a smear of
+plausible-looking characters that meant nothing. The model was crisp inside a band
+of maybe fifty commands and dissolved the instant you stepped outside it. We had
+spent the whole project learning to read one law — *the model learns what the data
+forces, not what it permits* — and here it was again, wearing a new face. The corpus
+forced about fifty commands. So the model knew about fifty commands. Everything past
+the edge of the training set was a confabulation.
+
+There were two ways out. Pour in more data until the band was wide enough to cover
+a Debian install — or stop asking the model to do things it had no business doing.
+The second idea took a while to say out loud, because it sounded like giving up. But
+`reboot` had been *scripted* since almost the beginning — real code driving the
+shutdown lifecycle while the model only dreamed the systemd lines. If `reboot` could
+be real, why was `ls` a hallucination? `ls` should never be *creative*. It should be
+*correct*. We had been asking a language model to remember which files existed, and
+paying for it in a corpus burden we'd been fighting for generations — the `ll`
+alias that wouldn't stick, the `cat` after `rm` that still showed the deleted file,
+the referential-consistency bugs that were never really the model's fault. They were
+the fault of asking a dream to be a database.
+
+So we split the shell down the middle. **Deterministic, stateful, must-be-consistent
+→ real code. Generative, variety-is-the-point → the model.** A real in-memory
+filesystem (`vfs.ts`), thirty-odd real coreutils over it (`coreutils.ts`), and a
+real little shell to tie them together (`shell-exec.ts`) — tokenizing quotes, wiring
+pipes, honoring `>` and `>>` and `&&`, expanding globs. `ls` and `cat` and
+`mkdir x && cd x && pwd` became *code*, always right, always consistent, feeding
+their real output back into the model's context so the dreams that followed stayed
+honest too. The consistency burden we'd carried for months didn't get fixed. It
+ceased to exist. You cannot teach a falsehood to a filesystem that is simply true.
+
+Which meant the corpus could finally forget most of itself. We went back to the
+Docker container and took an *exhaustive* capture this time — every command, under
+both `guest` and `root`, 534 distinct programs where the synthetic set had known
+about fifty — then threw away every record for a command the code now owned. What
+remained trained only what the model still dreams: `ping`, `git`, `ps`, `man`, the
+fun ones, and a new drill teaching the most useful trick of all — how to say
+`command not found` with dignity instead of hallucinating.
+
+That last drill nearly sank us, and it did it by obeying the law one more time. The
+first v9 came back and `kubectl` failed gracefully, exactly as designed — but so did
+`ps aux`, and so did `df -h`. Real commands, answered with *command not found*. The
+capture held maybe eight examples each of `ps` and `df`; the not-found drill held
+twelve thousand. The model had drawn the only conclusion the data allowed: an
+unfamiliar system command is one that doesn't exist. We fed it a focused diet of real
+`df`/`free`/`ps`/`top` output to balance the ledger, retrained, and watched the tables
+come back. Twenty-four minutes on the Mac's GPU, a number that used to be six hours.
+
+**v9** is the mind behind the URL now. Type `ls` and it is real. Type `ping bity.dev`
+and a model dreams you an address that never existed. Type `kubectl get pods` and it
+tells you, correctly, that it has never heard of such a thing. The terminal that once
+dreamed *everything* now dreams only the parts worth dreaming — and stands on real
+ground for the rest.
