@@ -337,6 +337,18 @@ it worked.
 10. **Instrument the tape** — after one forward pass, print each tape node's op label,
     shapes, and parent count (via `Tensor.label`/`parents`). Turns the abstract "graph
     on a tape" into something you can literally see.
+11. **Capstone: teach an agent to play a game (Flappy Bird clone)** — the ultimate
+    proof that the engine, not the transformer, is the point. Write the game as a ~60–100
+    line simulator (gravity, flap, pipes, collision — *not* ML). The brain is a tiny
+    **MLP** (`Linear(5)→gelu→Linear(2)`), not a `GPT`: state = `[bird_y, velocity,
+    dx_to_pipe, gap_center_y]`, actions = flap / don't. Then pick a recipe:
+    (a) **REINFORCE** — advantage-weighted cross-entropy (§13e): reuse `crossEntropyLogits`
+    with a per-sample weight, plus a rollout loop and discounted returns; or
+    (b) **Neuroevolution** — *zero autograd*: a population of random-weight MLPs run under
+    `noGrad`, keep the fittest, mutate/crossover their `Float32Array` weights (this is what
+    most "AI learns Flappy Bird" demos actually do). Uses only the universal half of the
+    repo (`Tensor`/`ops`/`Linear`/`MLP`/`AdamW`/`sampleLogits`) and *none* of the LLM
+    machinery — see §13c/§13e.
 
 ---
 
