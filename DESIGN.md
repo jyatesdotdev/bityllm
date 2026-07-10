@@ -115,7 +115,7 @@ The same audit caught two real generator **bugs** (the `rm -rf` failsafe was wro
 
 ### 2.5 Model selector — the size sweep, live in the browser
 
-The terminal **header** shows the running model's name/version, param count, and which inference engine won the load-time race (browser inference races a WebGPU session against the pure-TS CPU one and keeps the winner). Beside it, a retro **CRT-themed "channel" control** flips between a **four-size sweep** — **MICRO 2.7M**, **MINI 10.7M (default)**, **MAX 25M**, **ULTRA 57M** (wide → WebGPU wins). The default MINI is now the **hybrid-corpus v9**; MICRO/MAX/ULTRA remain corpus-v8 (retraining them on the hybrid corpus is an open follow-up).
+The terminal **header** shows the running model's name/version, param count, and which inference engine won the load-time race (browser inference races a WebGPU session against the pure-TS CPU one and keeps the winner). Beside it, a retro **CRT-themed "channel" control** flips between a **three-size sweep** — **MICRO 2.7M**, **MINI 10.7M (default)**, **MAX 25M** — all now trained on the **hybrid-corpus v9**. (An earlier wide 57M "ULTRA" slot, added to make the dispatch-bound WebGPU path win in-browser, was retired.)
 
 > **Design choice — why ship three sizes instead of one.** The whole project is an argument that a *tiny* model can hold a computer's texture; letting a visitor turn a dial and watch coherence trade against latency in real time makes that argument visceral in a way no table can. Holding the corpus constant across the sweep isolates the one variable (size), and the control doubles as a live proof of **"the checkpoint is the contract"** (§15.1): three differently-sized `bity1` files, one loader, one corpus, zero code changes between them.
 

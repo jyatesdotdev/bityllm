@@ -1,4 +1,17 @@
 // Shared sampling: temperature + top-k over raw logits → categorical draw.
+//
+// Turns the model's output scores (logits) into ONE chosen token:
+//   1. temperature — divide logits by T. T<1 sharpens (more confident/repetitive),
+//      T>1 flattens (more random/creative), T→0 approaches argmax.
+//   2. top-k — optionally keep only the k highest-scoring tokens (set the rest to
+//      -∞) so unlikely tokens can never be drawn.
+//   3. softmax → a probability distribution, then draw one token from it using the
+//      SEEDED rng (so a given seed reproduces a given generation).
+// This is the inference-time mirror of cross-entropy: both center on a softmax,
+// one to SCORE the distribution, this one to SAMPLE from it.
+//
+// Note: top-k here fully sorts all V logits (simple, fine for a small char vocab;
+// a partial-select would be the idiomatic choice at large vocab sizes).
 export function sampleLogits(logits, opts, rng) {
     const V = logits.length;
     const temperature = Math.max(opts.temperature ?? 0.8, 1e-6);

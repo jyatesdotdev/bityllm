@@ -134,8 +134,15 @@ export class Shell {
     }
     /** Stream model output with pacing, holding back a possible next-prompt. */
     async streamModel(bin, io) {
+        // The model was fed the command line as context (session.feed in run()), so a
+        // char-level model literally has the typed chars (e.g. "bity.dev") in its recent
+        // context — no argument-passing code is needed; it just continues the transcript.
         const stops = this.promptStops;
-        const guard = this.prompt.length; // longest stop → safe holdback window
+        // Holdback window: the stream stops the instant a stop-sequence appears, so any
+        // next-prompt the model began emitting lives entirely in the last ≤prompt.length
+        // chars. We stream everything older than that immediately, and trim the tail —
+        // so the model's own hallucinated next prompt never reaches the screen.
+        const guard = this.prompt.length;
         const cutMark = this.promptPrefix ? `${this.promptPrefix}:` : this.prompt;
         const opts = {
             maxNewTokens: bin?.maxNewTokens ?? 512,

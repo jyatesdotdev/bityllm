@@ -7,13 +7,12 @@
 // logic lives in src/infer/shell.ts and is unit-tested; this file is DOM glue.
 import { deserialize, InferenceSession, GPUInferenceSession, Shell, BINARIES, completeCommand, History } from "../../src/infer.js";
 const PROMPT = "guest@bity:~$ ";
-// the MODEL knob sweeps these — MINI is the hybrid-corpus v9 (real code owns
-// FS/text, model dreams the rest); the other sizes are still corpus v8
+// the MODEL knob sweeps these — all three are the hybrid-corpus v9 (deterministic
+// commands run as real code; the model dreams the rest + graceful command-not-found)
 const MODELS = [
-    { label: "MICRO", note: "2.7M", ver: "v8", file: "terminal-micro-v8.int8.bity" },
+    { label: "MICRO", note: "2.7M", ver: "v9", file: "terminal-micro-v9.int8.bity" },
     { label: "MINI", note: "10.7M", ver: "v9", file: "terminal.int8.bity" },
-    { label: "MAX", note: "25M", ver: "v8", file: "terminal-25m-v8.int8.bity" },
-    { label: "ULTRA", note: "57M", ver: "v8", file: "terminal-ultra-v8.int8.bity" }, // wide → WebGPU wins here
+    { label: "MAX", note: "25M", ver: "v9", file: "terminal-25m-v9.int8.bity" },
 ];
 const DEFAULT_MODEL = 1; // MINI (the deployed default)
 const textEl = document.getElementById("text");

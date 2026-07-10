@@ -74,12 +74,11 @@ swaps across the size sweep. Full table (all generations) in [RUNBOOK §7](RUNBO
 
 | Model | Params | Highlight |
 |---|---|---|
-| MICRO | 2.7M | copy circuit emerges — fastest, fuzziest (corpus v8) |
+| MICRO | 2.7M | copy circuit emerges — fastest, fuzziest (**hybrid v9**) |
 | **MINI** (deployed) | 10.7M | **hybrid corpus v9** — dreams `ping`/`git`/`ps`/`df`; graceful `command not found`; FS/text are real code |
-| MAX | 25.3M | the scale test that proved the ceiling was **coverage, not capacity** (v8) |
-| ULTRA | 57M | wide (8L/12H/768d) so **WebGPU wins** in-browser; overfits this corpus (v8) |
+| MAX | 25.3M | the scale test that proved the ceiling was **coverage, not capacity** (**hybrid v9**) |
 
-(MICRO/MAX/ULTRA are still corpus-v8 — retraining them on the hybrid corpus is the open follow-up.)
+(All three sizes now run the same hybrid-corpus v9.)
 
 ## Quickstart
 

@@ -31,9 +31,16 @@ export class CausalSelfAttention extends Module {
         const q = split(this.wq.forward(x));
         const k = split(this.wk.forward(x));
         const v = split(this.wv.forward(x));
+        // scores[i,j] = how much token i attends to token j = (qᵢ · kⱼ) / √head_dim.
+        //   • /√head_dim keeps the dot products from growing with dimension, which
+        //     would otherwise push softmax into a near-one-hot regime with tiny gradients.
+        //   • causalMask sets j > i to a large negative value (-1e30, effectively -∞ for
+        //     softmax but finite to avoid inf−inf NaNs) BEFORE softmax, so token i attends only to
+        //     tokens ≤ i. THIS is what makes it an autoregressive LM (no peeking at the
+        //     future); drop this one call and the same block becomes a ViT/encoder block.
         const scores = ops.causalMask(ops.scale(ops.matmulT(q, k), 1 / Math.sqrt(hd)), T); // [B,nH,T,T]
-        const att = ops.softmaxLastDim(scores);
-        const y = ops.reshape(ops.transpose12(ops.matmul(att, v)), [B, T, C]); // merge heads
+        const att = ops.softmaxLastDim(scores); // rows sum to 1: a weighting over past tokens
+        const y = ops.reshape(ops.transpose12(ops.matmul(att, v)), [B, T, C]); // weighted sum of V, merge heads
         return this.wo.forward(y);
     }
 }

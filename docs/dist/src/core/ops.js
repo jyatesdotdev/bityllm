@@ -14,8 +14,12 @@ export function add(a, b) {
         if (b.requiresGrad) {
             if (b.size === a.size)
                 addInto(b.ensureGrad(), g);
+            // Broadcasting rule: in the forward pass b (a bias / row vector) was COPIED
+            // across the broadcast axis. The adjoint of a copy is a SUM — every position
+            // b was copied to contributes to b's gradient — so we sum g back down to b's
+            // shape ("sumTo"). Getting this right is the discipline that prevents shape bugs.
             else
-                addInto(b.ensureGrad(), B().sumEvery(g, b.size)); // reduce broadcast dims (sumTo)
+                addInto(b.ensureGrad(), B().sumEvery(g, b.size));
         }
     });
 }
@@ -27,7 +31,14 @@ export function scale(a, s) {
             addInto(a.ensureGrad(), B().scale({ data: out.grad, shape: out.shape }, s).data);
     });
 }
-/** a @ b. b may be 2-D while a is batched (weight broadcast). */
+/** a @ b. b may be 2-D while a is batched (weight broadcast).
+ *
+ *  Backward rule for C = A @ B — the workhorse gradient behind every Linear layer
+ *  and all of attention. Given the upstream grad g = dL/dC, matrix calculus gives:
+ *      dL/dA = g @ Bᵀ        dL/dB = Aᵀ @ g
+ *  Intuition: each is "the OTHER input, transposed, times the incoming gradient" —
+ *  the only arrangement that makes the shapes match (dL/dA must match A). We pass
+ *  transposeA/transposeB flags so the backend never allocates a transposed copy. */
 export function matmul(a, b) {
     const nd = B().matmul(a.nd, b.nd);
     return opOutput(nd, [a, b], (out) => () => {
@@ -116,13 +127,23 @@ export function causalMask(a, T) {
     const nd = B().causalMask(a.nd, T);
     return opOutput(nd, [a], (out) => () => {
         if (a.requiresGrad) {
+            // .slice() COPIES the upstream grad before we zero the masked positions:
+            // out.grad is shared with other consumers, so mutating it in place would
+            // corrupt their gradient. Masked entries got -1e30 in forward → 0 grad here.
             const gm = { data: out.grad.slice(), shape: out.shape };
             B().causalMaskZeroGrad(gm, T);
             addInto(a.ensureGrad(), gm.data);
         }
     });
 }
-/** Mean cross-entropy over [N, V] logits vs integer targets. Fused & stable. */
+/** Mean cross-entropy over [N, V] logits vs integer targets. Fused & stable.
+ *
+ *  Forward: loss = mean( logsumexp(z) − z[target] ) — the negative log-probability
+ *  the model assigns to the correct token, computed via logsumexp so it never forms
+ *  a softmax that could overflow. Backward has an especially clean closed form:
+ *      dL/dz = (softmax(z) − onehot(target)) / N
+ *  i.e. "push the right token's probability up, all others down." Fusing forward and
+ *  backward lets ceBackward reuse the logsumexp (`lse`) from the forward pass. */
 export function crossEntropyLogits(logits, targets) {
     if (logits.shape.length !== 2)
         throw new Error("crossEntropyLogits: expected [N, V]");

@@ -14,15 +14,23 @@ export class Block extends Module {
     mlp;
     constructor(cfg, rng) {
         super();
+        // Residual-projection init scaling (GPT-2 trick): each Block adds TWO things to
+        // the residual stream (attn + mlp), across nLayer layers = 2·nLayer additions.
+        // Shrinking the output projections by 1/√(2·nLayer) keeps the residual stream's
+        // variance from growing with depth — a depth-aware flavor of Xavier/He init.
         const projStd = 0.02 / Math.sqrt(2 * cfg.nLayer);
         this.ln1 = this.sub(new LayerNorm(cfg.nEmbd));
         this.attn = this.sub(new CausalSelfAttention(cfg.nEmbd, cfg.nHead, rng, projStd));
         this.ln2 = this.sub(new LayerNorm(cfg.nEmbd));
         this.mlp = this.sub(new MLP(cfg.nEmbd, rng, projStd));
     }
+    // Pre-norm residual block: normalize, run the sublayer, ADD it back to x.
+    // The `x = x + sublayer(norm(x))` shape is the "residual stream" — each layer
+    // writes a correction onto a running vector rather than replacing it, which is
+    // what lets gradients flow cleanly through very deep stacks (ResNet's idea).
     forward(x) {
-        x = ops.add(x, this.attn.forward(this.ln1.forward(x)));
-        x = ops.add(x, this.mlp.forward(this.ln2.forward(x)));
+        x = ops.add(x, this.attn.forward(this.ln1.forward(x))); // mix tokens
+        x = ops.add(x, this.mlp.forward(this.ln2.forward(x))); // think per-token
         return x;
     }
 }
@@ -62,7 +70,10 @@ export class GPT extends Module {
         for (const b of this.blocks)
             x = b.forward(x);
         x = this.lnf.forward(x);
-        return ops.matmulT(x, this.wte); // tied head: [B,T,C] @ [V,C]ᵀ
+        // Weight-TIED head: reuse the embedding table `wte` as the output projection,
+        // so logits = x @ wteᵀ. No separate output matrix — and autograd's += means
+        // wte.grad correctly accumulates from BOTH its embedding use and this head use.
+        return ops.matmulT(x, this.wte); // [B,T,C] @ [V,C]ᵀ → [B,T,V]
     }
     /** Mean next-token cross-entropy over the batch. */
     loss(idx, targets, B, T) {

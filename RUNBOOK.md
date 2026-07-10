@@ -277,7 +277,9 @@ numbers disappoint.
 | `models/terminal-25m.bity` | 25.3M | corpus v7 (16k, MLX, 48m) | scale test: broke `wc -l`/`mv`, but multi-word content STILL 0% → proved it's coverage, not capacity |
 | `models/terminal-v8.bity` | 10.7M | corpus v8 @ 35MB (16k, MLX, 24m) | **exhaustive coverage: multi-word content 100%, nested `cd` 100%, touch→empty 100%; env/curl-body/ip-a/version-banners; val gap −0.0055 (no overfitting)** |
 | `models/terminal-mini-v9.bity` | 10.7M | **hybrid corpus** @ 28.5MB (16k, MLX, 24m) | **the hybrid pivot: FS/text/identity are real code, so this trains only the dreamed set. Dreams `ps`/`df`/`free`/`top` correctly; `kubectl`/garbage → clean `command not found`; `git`/`ping` good. train 0.521 / val 0.545 (gap +0.024)** |
-| `models/terminal.int8.bity` | — | — | **currently deployed: MINI v9 (hybrid).** MICRO/MAX/ULTRA in the demo's size sweep are still corpus-v8 (open follow-up: retrain on the hybrid corpus) |
+| `models/terminal-micro-v9.int8.bity` | 2.7M | hybrid corpus (16k, MLX) | MICRO size-sweep slot, retrained on the hybrid corpus |
+| `models/terminal-25m-v9.int8.bity` | 25.3M | hybrid corpus (16k, MLX) | MAX size-sweep slot, retrained on the hybrid corpus |
+| `models/terminal.int8.bity` | — | — | **currently deployed: MINI v9 (hybrid).** The demo's three-size sweep (MICRO/MINI/MAX) is all hybrid-v9. (The wide 57M ULTRA slot was retired.) |
 
 **Programmatic core (v9+):** deterministic commands no longer come from any model —
 `src/infer/vfs.ts` (in-memory FS), `coreutils.ts` (~35 binaries), `shell-exec.ts`

@@ -118,12 +118,14 @@ npm run pages
 
 - **Model swap needs no rebuild:** the page fetches `terminal.int8.bity` (the default,
   MINI) — replace that file to swap the default brain. The demo also has an in-browser
-  **MODEL knob** (`terminal.ts` `MODELS`/`switchModel`) that lazy-fetches size variants
-  (`terminal-micro-v8` 2.7M, `terminal-25m-v8` 25M, `terminal-ultra-v8` 57M `.int8.bity`)
-  and swaps `Shell.session` in place — those files must sit beside `terminal.int8.bity`
-  (in `docs/` when deployed) for the knob to switch. The 57M ULTRA is *wide* on purpose
-  (8L/12H/768d) so WebGPU beats CPU in-browser (see the GPU gotcha), but it overfits this
-  corpus — MINI/MAX generalize better. **Code** changes need `npx tsc -p tsconfig.web.json`.
+  **MODEL knob** (`terminal.ts` `MODELS`/`switchModel`) that lazy-fetches the size sweep
+  (`terminal-micro-v9` 2.7M, `terminal-25m-v9` 25M `.int8.bity`) and swaps `Shell.session`
+  in place — those files must sit beside `terminal.int8.bity` (in `docs/` when deployed)
+  for the knob to switch, and every file in `MODELS` must also be in the `npm run pages`
+  copy list or it 404s live. All three are now hybrid-corpus v9. (A wide 57M "ULTRA" slot
+  — 8L/12H/768d, added so the dispatch-bound WebGPU path beats CPU in-browser — was
+  retired; it also OOM'd at batch 32 on a 24 GB machine, needing batch ≤ 8.) **Code**
+  changes need `npx tsc -p tsconfig.web.json`.
 
 ---
 

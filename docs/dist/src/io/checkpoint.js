@@ -76,6 +76,11 @@ export function serializeInt8(model, tok, opts = {}) {
                 let max = 0;
                 for (let c = 0; c < cols; c++)
                     max = Math.max(max, Math.abs(t.data[r * cols + c]));
+                // Per-row symmetric int8: scale maps this row's largest magnitude to ±127,
+                // so q = round(x/s) fits in a signed byte and x ≈ q·s on load. Per-ROW (not
+                // per-tensor) keeps precision when rows have very different magnitudes. This
+                // is LOSSY — round-trip isn't bit-exact — but int8 is deploy-only; the f32
+                // checkpoint stays canonical and parity is verified against it.
                 const s = max > 0 ? max / 127 : 1;
                 scales[r] = s;
                 for (let c = 0; c < cols; c++)

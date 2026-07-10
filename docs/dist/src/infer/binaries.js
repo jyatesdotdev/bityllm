@@ -2,6 +2,10 @@
 // pacing, budget; the model does the rest. Scripted ones are plain functions.
 // Anything NOT registered falls through to free-form model continuation, so
 // every command "works"; the registry just tunes the experience.
+// Per-binary sampling is tuned to the OUTPUT's entropy: low temperature + small
+// topK for structured/table-like output (ls, pwd, uname) keeps it crisp and
+// format-faithful; higher temperature for open-ended output (fortune at 0.85,
+// history at 0.8) lets it vary. Same model, different decoding knobs per command.
 const model = (name, extra = {}) => ({
     name,
     kind: "model",

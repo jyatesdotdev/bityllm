@@ -81,7 +81,10 @@ export class InferenceSession {
         this.ctx.push(id);
         this.curT++;
     }
-    /** Cache full: rebuild from the most recent half of the context. */
+    /** Cache full: rebuild from the most recent half of the context.
+     *  The KV-cache is fixed at blockSize rows, so when it fills we keep only the
+     *  most recent half of the tokens and replay them from position 0 (a sliding
+     *  window — older context is discarded, which is fine for a streaming terminal). */
     rewind() {
         const keep = this.ctx.slice(-Math.floor(this.model.cfg.blockSize / 2));
         this.ctx = [];
@@ -113,8 +116,16 @@ export class InferenceSession {
             const q = be.add(be.matmul(h1, blk.attn.wq.w.nd), blk.attn.wq.b.nd).data;
             const k = be.add(be.matmul(h1, blk.attn.wk.w.nd), blk.attn.wk.b.nd).data;
             const v = be.add(be.matmul(h1, blk.attn.wv.w.nd), blk.attn.wv.b.nd).data;
+            // KV-CACHE write: K[l]/V[l] are flat [blockSize, C] buffers. Row = timestep,
+            // heads packed contiguously within a row (head h at columns [h·hd,(h+1)·hd)),
+            // so position `pos`, head `h` starts at index pos·C + h·hd. We store THIS
+            // token's k/v once; every future token reuses them instead of recomputing the
+            // whole prefix — that's why per-token cost is O(params), not O(params·T).
             this.K[l].set(k, pos * C);
             this.V[l].set(v, pos * C);
+            // Scaled dot-product attention for this one query token, head by head.
+            // scores[t] = (q · K[t]) / √hd for every past position t in [0,T). Causality
+            // is FREE: T = pos+1, so we only ever loop over positions ≤ pos.
             const attnOut = new Float32Array(C);
             const scores = new Float32Array(T);
             for (let h = 0; h < nH; h++) {
