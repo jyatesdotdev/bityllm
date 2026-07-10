@@ -2,6 +2,11 @@
 
 Running log of noteworthy work; newest first.
 
+## 2026-07-09 19:40 — Ship the hybrid architecture: MINI v9 trained, verified, deployed
+- **What:** Retrained MINI v9 with the `sysinfo` fix (MLX, 23.8 min, train 0.521 / val 0.545, gap +0.024) and eval'd out-of-band: **`ps aux`/`df -h`/`free -h`/`top -bn1` now dream correct tables**, `kubectl`/`asdfghjk` → clean `command not found`, `git`/`ping` good. Exported int8 (10.7M → 10.6 MB), bumped the banner to per-model versions (MINI=v9, others v8), rebuilt `docs/`, and **deployed to the live demo** (pushed `main`). 7 commits this session (capture → core → rebalance → /proc seed → sysinfo fix → deploy).
+- **Why:** Close out the hybrid pivot end-to-end — deterministic commands as real code, the model reserved for what it should dream, out-of-band gibberish replaced by graceful `command not found`.
+- **Impact:** The breadth ceiling (gibberish outside ~50 commands) is addressed: FS/text/identity are always correct (CORE), dreamed commands are cleaner, unknowns fail gracefully. **Follow-up:** MICRO/MAX/ULTRA are still corpus-v8 (mixed size sweep) — retrain each on the hybrid corpus for consistency (`train/mlx_train.py` with the per-size `--layers/--heads/--dim`). `find` remains capture-thin and dreams weakly (low priority).
+
 ## 2026-07-09 19:02 — Fix graceful-unknown OVER-firing (real commands → "command not found")
 - **What:** Trained MINI v9 on the rebalanced corpus (23.9 min, MLX, train 0.535 / val 0.576) and eval'd it. Graceful-unknown worked (`kubectl`/`asdfghjk` → clean `command not found`; `ping`/`git` dream well) BUT **`ps aux` and `df -h` returned `command not found`** — the model over-learned the fallback for *real* commands. Fix: added a focused `sysinfoGen` in `corpus/generators/sys.mjs` (df/free/ps/top/lscpu/lsblk/mount/vmstat, reusing the existing `dfH`/`freeH`/`psAux` formatters, ~10.5k records) and **halved** the `unknown` weight (12.8k→6.6k records); retraining now.
 - **Why:** The capture is **thin** on system commands (ps=10, df=8, free=8 records) — no match for a 12.8k-record not-found flood, so the model generalized "unfamiliar sys command → not found."
