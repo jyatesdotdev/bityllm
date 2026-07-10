@@ -129,3 +129,80 @@ export function* sysGen(rng) {
     }
   }
 }
+
+// ---- dreamed system/hardware info (post-hybrid) --------------------------------
+// The programmatic CORE owns identity commands (whoami/uname/date/uptime/arch/env),
+// but df/free/ps/top/lscpu/lsblk/mount/vmstat are still DREAMED. The capture is thin
+// on them (~8-10 records each), so without this focused generator the graceful
+// `command not found` drill overwhelms them and the model answers "not found" for
+// real commands. This restores strong positive signal for exactly those commands.
+function psShort(rng) {
+  return ["    PID TTY          TIME CMD",
+    `   ${randint(rng, 800, 1600)} pts/0    00:00:00 bash`,
+    `   ${randint(rng, 1700, 9000)} pts/0    00:00:00 ps`].join("\n");
+}
+function topOut(rng) {
+  const rows = [
+    `top - ${uptimeStr(rng).trim()}`,
+    `Tasks: ${randint(rng, 90, 140)} total,   1 running, ${randint(rng, 89, 139)} sleeping,   0 stopped,   0 zombie`,
+    `%Cpu(s):  ${(rng.random() * 4).toFixed(1)} us,  ${(rng.random() * 2).toFixed(1)} sy,  0.0 ni, ${(93 + rng.random() * 6).toFixed(1)} id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st`,
+    `MiB Mem :   1959.0 total,    ${randint(rng, 120, 400)}.0 free,    ${randint(rng, 400, 800)}.0 used,    ${randint(rng, 600, 1000)}.0 buff/cache`,
+    "MiB Swap:    977.0 total,    977.0 free,      0.0 used.   " + randint(rng, 900, 1400) + ".0 avail Mem",
+    "",
+    "    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND",
+  ];
+  for (const [u, c] of [["root", "systemd"], ["root", "sshd"], ["guest", "bash"], ["guest", "top"]]) {
+    rows.push(`${String(randint(rng, 1, 9000)).padStart(7)} ${u.padEnd(8)}  20   0 ${String(randint(rng, 10000, 200000)).padStart(7)} ${String(randint(rng, 5000, 20000)).padStart(6)} ${String(randint(rng, 3000, 10000)).padStart(6)} S   ${(rng.random() * 2).toFixed(1)}   ${(rng.random() * 2).toFixed(1)}   0:0${randint(rng, 0, 9)}.${randint(rng, 0, 9)} ${c}`);
+  }
+  return rows.join("\n");
+}
+function lscpuOut(rng) {
+  const n = pick(rng, [2, 4, 8]);
+  return [
+    "Architecture:            aarch64", "  CPU op-mode(s):        64-bit", "  Byte Order:            Little Endian",
+    `CPU(s):                  ${n}`, `  On-line CPU(s) list:   0-${n - 1}`,
+    "Vendor ID:               ARM", "Caches (sum of all):", "  L1d:                   128 KiB", "  L2:                    4 MiB",
+  ].join("\n");
+}
+function lsblkOut(rng) {
+  const g = pick(rng, [40, 60, 120, 240]);
+  return [
+    "NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINTS",
+    `vda     254:0    0  ${g}G  0 disk `,
+    `|-vda1  254:1    0 ${g - 1}G  0 part /`,
+    "|-vda14 254:14   0    4M  0 part ",
+    "`-vda15 254:15   0  124M  0 part /boot/efi",
+  ].join("\n");
+}
+function mountOut(rng) {
+  return [
+    "/dev/vda1 on / type ext4 (rw,relatime)",
+    "proc on /proc type proc (rw,nosuid,nodev,noexec,relatime)",
+    "sysfs on /sys type sysfs (rw,nosuid,nodev,noexec,relatime)",
+    `tmpfs on /run type tmpfs (rw,nosuid,nodev,size=${randint(rng, 300, 800)}M)`,
+    "tmpfs on /dev/shm type tmpfs (rw,nosuid,nodev)",
+  ].join("\n");
+}
+function vmstatOut(rng) {
+  return [
+    "procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----",
+    " r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st",
+    ` ${randint(rng, 0, 3)}  0      0 ${String(randint(rng, 120000, 400000)).padStart(6)} ${String(randint(rng, 50000, 90000)).padStart(6)} ${String(randint(rng, 700000, 900000)).padStart(6)}    0    0    ${randint(rng, 1, 40)}    ${randint(rng, 1, 60)}  ${randint(rng, 30, 90)}  ${randint(rng, 40, 99)}  ${randint(rng, 1, 5)} ${randint(rng, 2, 8)} ${randint(rng, 88, 97)}  ${randint(rng, 0, 2)}  0`,
+  ].join("\n");
+}
+
+export function* sysinfoGen(rng) {
+  for (;;) {
+    const r = rng.random();
+    if (r < 0.22) yield rec(chance(rng, 0.8) ? "df -h" : "df -hT", dfH(rng));
+    else if (r < 0.44) yield rec(chance(rng, 0.8) ? "free -h" : "free -m", freeH(rng));
+    else if (r < 0.60) yield rec(pick(rng, ["ps aux", "ps aux", "ps -ef"]), psAux(rng));
+    else if (r < 0.68) yield rec("ps", psShort(rng));
+    else if (r < 0.74) yield rec("nproc", String(pick(rng, [2, 4, 8])));
+    else if (r < 0.82) yield rec("top -bn1", topOut(rng));
+    else if (r < 0.89) yield rec("lscpu", lscpuOut(rng));
+    else if (r < 0.94) yield rec("lsblk", lsblkOut(rng));
+    else if (r < 0.98) yield rec("mount", mountOut(rng));
+    else yield rec("vmstat", vmstatOut(rng));
+  }
+}

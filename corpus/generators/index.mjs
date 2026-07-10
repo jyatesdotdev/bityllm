@@ -11,15 +11,17 @@
 import { netGen } from "./net.mjs";
 import { gitGen } from "./git.mjs";
 import { funGen } from "./fun.mjs";
+import { sysinfoGen } from "./sys.mjs";
 import { unknownGen } from "./unknown.mjs";
 
 export { RNG, PROMPT } from "./lib.mjs";
 
 export const GENERATORS = [
-  { name: "net", weight: 0.32, gen: netGen },         // ping/traceroute/curl — the headline act
-  { name: "git", weight: 0.21, gen: gitGen },         // git status/log/diff variety
-  { name: "fun", weight: 0.21, gen: funGen },         // fortune/cowsay/neofetch charm
-  { name: "unknown", weight: 0.26, gen: unknownGen }, // graceful command-not-found fallback (~8% of corpus)
+  { name: "net", weight: 0.26, gen: netGen },         // ping/traceroute/curl — the headline act
+  { name: "git", weight: 0.17, gen: gitGen },         // git status/log/diff variety
+  { name: "fun", weight: 0.15, gen: funGen },         // fortune/cowsay/neofetch charm
+  { name: "sysinfo", weight: 0.26, gen: sysinfoGen }, // df/free/ps/top/lscpu/lsblk/mount — DREAMED but capture-thin
+  { name: "unknown", weight: 0.16, gen: unknownGen }, // graceful command-not-found fallback
 ];
 
 // no block generators: the stateful mkdir/touch → ls sessions are now the
