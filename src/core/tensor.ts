@@ -73,7 +73,7 @@ export class Tensor {
   /** Reverse-mode sweep from this scalar; consumes and clears the tape. */
   backward(): void {
     if (this.size !== 1) throw new Error("backward() requires a scalar loss");
-    this.ensureGrad()[0] = 1;
+    this.ensureGrad()[0] = 1; // seed the chain rule: dL/dL = 1; every other grad derives from this
     for (let i = tape.length - 1; i >= 0; i--) {
       const t = tape[i];
       if (t.backwardFn !== null && t.grad !== null) t.backwardFn();
@@ -86,6 +86,10 @@ export class Tensor {
 
 /** Internal: wrap an op output, wiring it onto the tape when grads are on. */
 export function opOutput(nd: NdArray, parents: Tensor[], makeBackward: (out: Tensor) => () => void): Tensor {
+  // Gradient gating: only record this node on the tape if some parent needs a
+  // gradient (i.e. its ancestry reaches a learnable parameter). Ops on pure
+  // data/eval inputs build no graph and cost no memory — this is how noGrad()
+  // and frozen inputs stay free.
   const req = parents.some((p) => p.requiresGrad);
   const out = new Tensor(nd, req);
   if (gradEnabled && req) {

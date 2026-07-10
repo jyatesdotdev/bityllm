@@ -16,6 +16,10 @@ export class CharTokenizer implements Tokenizer {
     this.stoi = new Map(vocab.map((c, i) => [c, i]));
   }
 
+  // Vocab = the sorted set of unique characters in the corpus. "A token" here is
+  // literally one character (no BPE/subwords) — the simplest possible tokenizer.
+  // Sorting makes the id↔char mapping deterministic given the same corpus, and
+  // the resulting vocab is saved INSIDE the checkpoint so inference is exact.
   static fromText(text: string): CharTokenizer {
     return new CharTokenizer([...new Set(text)].sort());
   }

@@ -31,8 +31,14 @@ export class Dataset {
     const x = new Int32Array(B * T);
     const y = new Int32Array(B * T);
     for (let b = 0; b < B; b++) {
+      // a random window start; each of the B rows is an independent sample so one
+      // batch estimates the full-corpus gradient cheaply (mini-batch SGD)
       const start = rng.randint(0, src.length - T - 1);
       for (let t = 0; t < T; t++) {
+        // The self-supervision trick: y is x shifted by ONE. The target for
+        // position t is simply the next character. That's how a plain text corpus
+        // with no labels becomes supervised (predict-the-next-token) data — the
+        // model at position t sees x[0..t] and must predict y[t] = x[t+1].
         x[b * T + t] = src[start + t];
         y[b * T + t] = src[start + t + 1];
       }

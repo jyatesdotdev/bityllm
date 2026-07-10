@@ -7,7 +7,8 @@ there is no real shell. Live: https://jyatesdotdev.github.io/bityllm/
 
 Companion docs: **[DESIGN.md](DESIGN.md)** (the *why*), **[RUNBOOK.md](RUNBOOK.md)**
 (the *how* — most current source of truth; cross-check it before quoting numbers),
-**[JOURNEY.md](JOURNEY.md)** (the narrative). When in doubt, RUNBOOK wins.
+**[JOURNEY.md](JOURNEY.md)** (the narrative), **[LEARNING.md](LEARNING.md)** (a guided
+code-reading path for newcomers + how these concepts generalize beyond LLMs). When in doubt, RUNBOOK wins.
 
 ---
 

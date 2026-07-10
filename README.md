@@ -49,6 +49,7 @@ curriculum" that forced an induction circuit to form at 2.7M parameters.
 
 | Doc | What's in it |
 |---|---|
+| [**LEARNING.md**](LEARNING.md) | **start here to learn** — a guided reading path through the code, deep dives on autograd/attention/sampling, extension projects, and how these concepts generalize beyond LLMs (CNNs, RNNs, diffusion, RL) |
 | [DESIGN.md](DESIGN.md) | the architecture and every decision, written before the code |
 | [RUNBOOK.md](RUNBOOK.md) | reproduce everything: corpus capture → training (CPU/GPU/MLX) → deploy, with all gotchas |
 | [JOURNEY.md](JOURNEY.md) | the narrative — model generations, real bugs (incl. a floating-point cliff inside Apple's fast-math `tanh`), the emergent copy circuit, and the corpus-v8 ceiling break |
