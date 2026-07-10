@@ -5,6 +5,10 @@
 
 import type { Binary } from "./shell.ts";
 
+// Per-binary sampling is tuned to the OUTPUT's entropy: low temperature + small
+// topK for structured/table-like output (ls, pwd, uname) keeps it crisp and
+// format-faithful; higher temperature for open-ended output (fortune at 0.85,
+// history at 0.8) lets it vary. Same model, different decoding knobs per command.
 const model = (name: string, extra: Partial<Binary> = {}): Binary => ({
   name,
   kind: "model",

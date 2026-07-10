@@ -38,22 +38,27 @@ export function generate(model: GPT, tok: Tokenizer, prompt: string, opts: GenOp
       const logits = noGrad(() => model.forward(window, 1, T));
       const last = logits.data.subarray((T - 1) * V, T * V);
 
-      // temperature + top-k → softmax → categorical
+      // temperature + top-k → softmax → categorical (the inference mirror of CE):
       const probs = new Float64Array(V);
       let max = -Infinity;
       for (let j = 0; j < V; j++) {
-        probs[j] = last[j] / Math.max(temperature, 1e-6);
+        probs[j] = last[j] / Math.max(temperature, 1e-6); // T<1 sharpens, T>1 flattens
         if (probs[j] > max) max = probs[j];
       }
       if (topK > 0 && topK < V) {
+        // keep only the k largest logits; set the rest to -Infinity so exp() below
+        // makes them exactly 0 → they can never be drawn, no renormalization needed
         const kth = [...probs].sort((a, b) => b - a)[topK - 1];
         for (let j = 0; j < V; j++) if (probs[j] < kth) probs[j] = -Infinity;
       }
       let sum = 0;
       for (let j = 0; j < V; j++) {
-        probs[j] = Math.exp(probs[j] - max);
+        probs[j] = Math.exp(probs[j] - max); // unnormalized softmax weight
         sum += probs[j];
       }
+      // Seeded categorical draw by inverse-CDF: pick r uniformly in [0, sum), walk
+      // the weights subtracting each until r ≤ 0. Token j is chosen with probability
+      // probs[j]/sum — i.e. exactly softmax — without ever normalizing.
       let r = rng.random() * sum;
       let id = V - 1;
       for (let j = 0; j < V; j++) {

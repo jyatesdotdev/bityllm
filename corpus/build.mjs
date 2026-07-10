@@ -17,8 +17,12 @@ import { GENERATORS, BLOCK_GENERATORS, RNG, PROMPT } from "./generators/index.mj
 
 const DATA = resolve(dirname(fileURLToPath(import.meta.url)), "data");
 
-// Commands handled by the programmatic CORE — filtered OUT of the real capture
-// (the model never dreams these). Kept in sync with coreutils.ts CORE keys.
+// Commands handled by the programmatic CORE. A three-way invariant, all keyed to
+// coreutils.ts's CORE map: (1) these run as REAL CODE, never dreamed; (2) so their
+// real-capture records are dropped below as pure training dilution; (3) and the
+// synthetic generators (generators/index.mjs) deliberately no longer emit them.
+// If you add a command to coreutils CORE, add it here too or the model wastes
+// capacity learning output it will never be asked to produce.
 const CORE_COMMANDS = new Set([
   "pwd", "echo", "whoami", "id", "hostname", "groups", "arch", "uname", "uptime", "date",
   "true", "false", "clear", "which", "env", "printenv", "ls", "cat", "cd", "mkdir", "rmdir",

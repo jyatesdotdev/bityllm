@@ -122,7 +122,11 @@ export async function trainParallel(
       Atomics.notify(ctrl, 0);
       for (let w = 0; w < W; w++) await waitFor(ctrl, 1 + w, gen, errs);
 
-      // average worker grads → main grad buffer
+      // Data-parallel gradient reduction. Each of the W workers computed the
+      // gradient of the MEAN loss over its own microBatch. Gradients are linear,
+      // so averaging the W per-worker mean-gradients equals the gradient of the
+      // mean loss over all W·microBatch samples — i.e. one big batch, computed in
+      // parallel. (This is exactly what multi-GPU all-reduce does at scale.)
       for (let i = 0; i < total; i++) {
         let s = 0;
         for (let w = 0; w < W; w++) s += slabs[w][i];

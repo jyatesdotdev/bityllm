@@ -320,6 +320,11 @@ export class CPUBackend implements Backend {
         for (let j = i + 1; j < T; j++) gd[o + i * T + j] = 0;
   }
 
+  // Cross-entropy for next-token prediction, the numerically stable way. For one
+  // row of logits z with target class t:  loss = −log softmax(z)[t] = logsumexp(z) − z[t].
+  // logsumexp(z) = max + log Σ exp(z − max); subtracting the row max before exp keeps
+  // the exponentials in [0,1] so nothing overflows. We stash lse per row so the
+  // backward pass can reuse it (the two are fused — see ops.crossEntropyLogits).
   ceForward(logits: NdArray, targets: Int32Array): { loss: number; lse: FloatArray } {
     const [N, V] = logits.shape;
     const zd = logits.data, lse = this.alloc(N);
@@ -336,14 +341,18 @@ export class CPUBackend implements Backend {
     }
     return { loss: loss / N, lse };
   }
+  // The famously clean CE gradient:  dL/dz = (softmax(z) − onehot(target)) / N.
+  // exp(z − lse) IS softmax(z) (lse already folds in the row max), and s = gscale/N
+  // carries the mean-over-N factor. So every logit gets +softmax·s, and the target
+  // logit additionally gets −s: "push the right token up, all others down."
   ceBackward(logits: NdArray, lse: FloatArray, targets: Int32Array, gscale: number): NdArray {
     const [N, V] = logits.shape;
     const zd = logits.data, out = this.alloc(zd.length);
     const s = gscale / N;
     for (let i = 0; i < N; i++) {
       const o = i * V, l = lse[i];
-      for (let j = 0; j < V; j++) out[o + j] = Math.exp(zd[o + j] - l) * s;
-      out[o + targets[i]] -= s;
+      for (let j = 0; j < V; j++) out[o + j] = Math.exp(zd[o + j] - l) * s; // softmax(z) · s
+      out[o + targets[i]] -= s;                                             // − onehot(target) · s
     }
     return { data: out, shape: [N, V] };
   }

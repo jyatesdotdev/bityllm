@@ -49,12 +49,14 @@ export function train(model: GPT, data: Dataset, cfg: TrainConfig): { finalLoss:
 
   for (let step = 0; step < cfg.steps; step++) {
     const batch = data.getBatch("train", B, T, rng);
-    const loss = model.loss(batch.x, batch.y, B, T);
+    // THE five-step training step — identical for every gradient-based model,
+    // only `getBatch` and `loss` are task-specific (see LEARNING.md §2, §13):
+    const loss = model.loss(batch.x, batch.y, B, T); // 1. forward → scalar CE loss
     last = loss.item();
-    loss.backward();
-    clipGradNorm(opt.params, clip);
-    opt.step(cosineLR(step, lrOpts));
-    opt.zeroGrad();
+    loss.backward();                                 // 2. reverse-mode autograd fills every .grad
+    clipGradNorm(opt.params, clip);                  // 3. rescale grads if their global norm is too big
+    opt.step(cosineLR(step, lrOpts));                // 4. AdamW nudges each weight down its gradient
+    opt.zeroGrad();                                  // 5. clear grads for the next step (they accumulate)
     tickTokens += B * T;
 
     const logEvery = cfg.logEvery ?? 10;

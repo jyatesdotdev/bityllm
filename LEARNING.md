@@ -446,7 +446,66 @@ Teaching material is worse than useless if it's wrong. Watch these:
    LM — image-scale training would be memory/time-prohibitive. That's an *engineering*
    limit, not a conceptual one — but state both halves honestly.
 
-### 13e. The one-sentence answer
+### 13e. Worked example: what would reinforcement learning actually take?
+
+RL feels like a different world, but it reuses **this repo's entire
+network + optimizer + autograd half unchanged**. Here's the honest accounting.
+
+**What stays exactly as-is:**
+- **The network.** A *policy* is just a model that outputs logits over **actions**
+  instead of over tokens — structurally identical to what `GPT.forward` /
+  `Linear` / `MLP` already do. For a classic control task it's a small MLP you can
+  build today from `src/index.ts` exports.
+- **Action selection.** `sampleLogits` (`src/infer/sampler.ts`) already samples from
+  a categorical distribution — that *is* sampling an action from a policy.
+  Temperature/top-k become your **exploration** knobs.
+- **Autograd, AdamW, `clipGradNorm`, the loop.** Untouched. (Grad clipping is
+  *especially* standard in RL — returns are high-variance.)
+
+**What changes — two things:**
+
+1. **Where data comes from.** There's no fixed corpus. You replace
+   `Dataset.getBatch` with an **environment + rollout loop** (external code, e.g.
+   CartPole): `reset → observe state → policy samples action → env returns (reward,
+   next state) → repeat`. A "batch" becomes a buffer of `(state, action, reward)`
+   transitions you just collected. The environment is a *simulator*, not ML — it
+   lives outside this repo.
+
+2. **The loss.** Not cross-entropy against a fixed label. The canonical
+   policy-gradient (REINFORCE) objective is:
+
+   ```
+   L = − Σ_t  log π(aₜ | sₜ) · Aₜ
+   ```
+
+   where `π(aₜ|sₜ)` is the policy's probability of the action it actually took (a
+   softmax over the policy logits — the *same* softmax as everywhere), and `Aₜ` is
+   the **advantage** (how much better that action turned out than expected — e.g. the
+   discounted future reward, minus a baseline).
+
+**The beautiful part — you already have most of the loss.** Cross-entropy *is*
+`−log softmax(z)[target]`. So `−log π(aₜ|sₜ)` is exactly `crossEntropyLogits(policy_logits, actions)`.
+That makes **REINFORCE literally advantage-weighted cross-entropy** — the loss you're
+already reading in `src/core/ops.ts` and `src/backend/cpu.ts`, just with a per-sample
+weight `Aₜ`. "Reward-weighted next-action prediction."
+
+**What you'd add (small, concrete):**
+- **Per-sample weighting** in cross-entropy (it's currently an unweighted mean) — a
+  few lines in `ceForward`/`ceBackward`.
+- **Advantage estimation** — compute discounted returns `Gₜ = Σ γᵏ rₜ₊ₖ` in plain
+  JS; optionally subtract a **value baseline** `V(sₜ)` from a second network head
+  trained with **MSE** against `Gₜ` (that needs the **MSE op** from §13c — one new
+  differentiable op). Actor-critic / PPO add a value head, GAE, and a clipped
+  surrogate — but every one of those is "assemble a *different scalar*, then
+  `backward()` the same way."
+
+**What's genuinely outside the repo:** the environment/rollout machinery (external),
+one MSE op, and a small weighted-CE tweak. **Nothing in the autograd or optimizer
+changes.** The "special kind of gradient" people imagine RL needs is a myth — the
+cleverness is entirely in *constructing the reward-weighted scalar and estimating
+advantages*; the differentiation is the same reverse-mode sweep from §4.
+
+### 13f. The one-sentence answer
 
 > The transformer is the interesting *cap*; the autograd engine, the module tree, the
 > optimizer, the loss-and-loop, the checkpointing — **the ~80% of this repo that isn't

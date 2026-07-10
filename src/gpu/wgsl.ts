@@ -1,5 +1,19 @@
 // WGSL kernels for the WebGPU training backend (DESIGN M6).
 //
+// --- WGSL crash-course (read once; applies to every kernel below) ---
+// A compute shader runs the SAME `main` function across thousands of parallel
+// threads on the GPU. Key vocabulary:
+//   @workgroup_size(N)         — N threads form one "workgroup" that shares fast
+//                                on-chip memory and can synchronize.
+//   @builtin(global_invocation_id) — this thread's unique (x,y,z) index; kernels
+//                                use it to pick which output element THEY compute.
+//   var<storage>               — a big buffer in slow global GPU memory (the tensors).
+//   var<workgroup>             — small, fast memory shared within one workgroup
+//                                (used below to cache matmul tiles).
+//   workgroupBarrier()         — wait until all threads in the workgroup reach here.
+// The art of a GPU kernel is minimizing slow global-memory reads by cooperatively
+// staging data into fast shared memory — that's what the tiled GEMM below does.
+//
 // One über-GEMM covers every matmul in fwd+bwd (batching via inner/outer
 // strides, transpose flags, alpha/beta accumulate, fused bias); row-wise
 // kernels handle the normalized ops; elementwise kernels do the rest.
