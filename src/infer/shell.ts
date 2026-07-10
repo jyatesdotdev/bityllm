@@ -4,6 +4,14 @@
 
 import type { StreamOpts } from "./session.ts";
 import type { SampleOpts } from "./sampler.ts";
+import { VFS } from "./vfs.ts";
+import { execLine } from "./shell-exec.ts";
+import { CORE, DREAMED } from "./coreutils.ts";
+import type { ShellState } from "./coreutils.ts";
+
+/** Cap the real output fed back into the model's context: enough for the dream
+ *  to stay coherent, not so much it floods the short context window. */
+const clampCtx = (s: string): string => (s.length > 600 ? s.slice(0, 600) : s);
 
 /** Any inference engine: CPU InferenceSession (sync generator) or
  *  GPUInferenceSession (async generator) — the Shell consumes both. */
@@ -53,8 +61,12 @@ export class Shell {
   /** front-panel overrides (null/"stock" = per-binary settings) */
   tempOverride: number | null = null;
   pacingMode: "stock" | "turbo" | "slow" = "stock";
-  /** current directory — the prompt carries it (v7); cd is a shell builtin */
+  /** display cwd for the prompt ("~", "~/projects"); derived from state.cwd */
   cwd = "~";
+  /** the programmatic core's world: a real virtual FS + cwd + env. Deterministic
+   *  commands (ls/cat/grep/pipes/…) run against THIS as real code; only generative
+   *  commands (git/ping/…/unknown) fall through to the model. */
+  state: ShellState;
   private readonly promptPrefix: string | null;
   private readonly staticPrompt: string;
   private seedCounter: number;
@@ -66,7 +78,41 @@ export class Shell {
     this.promptPrefix = m ? m[1] : null;
     this.staticPrompt = opts.prompt;
     this.seedCounter = opts.seed ?? (Date.now() & 0xffff);
+    // derive the user from a "user@host" prompt prefix; default guest
+    const user = this.promptPrefix?.split("@")[0] || "guest";
+    const home = user === "root" ? "/root" : "/home/guest";
+    this.state = {
+      vfs: new VFS(),
+      cwd: home,
+      user,
+      env: new Map([
+        ["HOME", home], ["USER", user], ["SHELL", "/bin/bash"], ["PWD", home],
+        ["TERM", "xterm-256color"], ["PATH", "/usr/local/bin:/usr/bin:/bin"], ["LANG", "en_US.UTF-8"],
+      ]),
+      lastExit: 0,
+    };
+    this.syncCwd();
     session.feed(this.prompt); // prime the context with the first prompt
+  }
+
+  /** Reflect the programmatic cwd into the ~-relative display path. */
+  private syncCwd(): void {
+    const home = this.state.user === "root" ? "/root" : "/home/guest";
+    const p = this.state.cwd;
+    this.cwd = p === home ? "~" : p.startsWith(home + "/") ? "~/" + p.slice(home.length + 1) : p;
+  }
+
+  /** Reset the working directory to home (used by reboot). */
+  resetToHome(): void {
+    this.state.cwd = this.state.user === "root" ? "/root" : "/home/guest";
+    this.state.env.set("PWD", this.state.cwd);
+    this.syncCwd();
+  }
+
+  /** All command names the UI can complete/list: programmatic core + dreamed set
+   *  + registered binaries (deduped). */
+  commandNames(): string[] {
+    return [...new Set([...Object.keys(CORE), ...DREAMED, ...this.registry.keys()])].sort();
   }
 
   get prompt(): string {
@@ -82,43 +128,64 @@ export class Shell {
     return this.promptPrefix ? [this.prompt, `${this.promptPrefix}:`] : [this.prompt];
   }
 
-  /** cd builtin: pure string logic over a dreamed filesystem — no validation */
-  private applyCd(arg: string | undefined): void {
-    if (!arg || arg === "~" || arg === "$HOME") this.cwd = "~";
-    else if (arg === "..") this.cwd = this.cwd.includes("/") ? this.cwd.slice(0, this.cwd.lastIndexOf("/")) || "~" : "~";
-    else if (arg === ".") { /* no-op */ }
-    else if (arg.startsWith("/")) this.cwd = arg === "/home/guest" ? "~" : arg.startsWith("/home/guest/") ? "~/" + arg.slice(12) : arg;
-    else this.cwd = (this.cwd === "~" ? "~" : this.cwd) + "/" + arg.replace(/\/+$/, "");
-  }
-
   register(...bins: Binary[]): void {
     for (const b of bins) this.registry.set(b.name, b);
   }
 
-  /** Run one command line. The caller displays its own prompt + echo. */
+  /** Run one command line. The caller displays its own prompt + echo.
+   *
+   *  Routing (the hybrid split): scripted binaries (help/clear/reboot) do
+   *  host-level things and win; then the programmatic CORE runs deterministic
+   *  commands as real code over the VFS; only generative/unknown commands fall
+   *  through to the model. Real output is still fed to the session so the dream
+   *  context stays truthful for whatever gets dreamed next. */
   async run(line: string, io: ShellIO): Promise<void> {
-    const argv = line.trim().split(/\s+/).filter(Boolean);
+    const trimmed = line.trim();
+    const argv = trimmed.split(/\s+/).filter(Boolean);
     const ctx: ShellContext = { io, session: this.session, prompt: this.prompt, shell: this };
     const bin = argv.length ? this.registry.get(argv[0]) : undefined;
 
-    // context: the typed line becomes part of the transcript the model sees
-    // (a binary may rewrite it into the phrasing the corpus actually knows)
-    this.session.feed((bin?.rewrite ? bin.rewrite(line) : line) + "\n");
-    if (argv.length === 0) return;
-
-    if (argv[0] === "cd") {
-      // builtin, like a real shell: silent success, the prompt moves
-      this.applyCd(argv[1]);
+    // 1) scripted binaries clear the DOM / reset the session — they take precedence
+    if (bin?.kind === "scripted" && bin.run) {
+      this.session.feed((bin.rewrite ? bin.rewrite(line) : line) + "\n");
+      await bin.run(argv, ctx);
       this.session.feed(this.prompt);
       return;
     }
 
-    if (bin?.kind === "scripted" && bin.run) {
-      await bin.run(argv, ctx);
-    } else {
-      await this.streamModel(bin, io);
+    // 2) programmatic core: deterministic FS/text/identity commands + pipes,
+    //    redirects, globs, $VARs, && || — all real code, always consistent
+    if (trimmed) {
+      const res = execLine(trimmed, this.state);
+      if (!res.dreamed) {
+        this.session.feed(trimmed + "\n");
+        if (res.out) {
+          await this.writePaced(res.out, io);
+          this.session.feed(clampCtx(res.out)); // keep the dream context truthful
+        }
+        this.state.env.set("PWD", this.state.cwd);
+        this.syncCwd();
+        this.session.feed(this.prompt);
+        return;
+      }
     }
+
+    // 3) generative/unknown → the model (a binary may rewrite the fed line into
+    //    the phrasing the corpus actually knows)
+    this.session.feed((bin?.rewrite ? bin.rewrite(line) : line) + "\n");
+    if (argv.length === 0) return;
+    await this.streamModel(bin, io);
     this.session.feed(this.prompt); // the shell's next prompt is model context too
+  }
+
+  /** Render deterministic output. Real commands feel instant (retro slow-mode
+   *  still paces them); only dreamed output gets the streaming-typewriter charm. */
+  private async writePaced(text: string, io: ShellIO): Promise<void> {
+    const charDelay = this.pacingMode === "slow" ? 8 : 0;
+    for (const ch of text) {
+      io.write(ch);
+      if (charDelay > 0) await io.delay(charDelay);
+    }
   }
 
   /** Stream model output with pacing, holding back a possible next-prompt. */

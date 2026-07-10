@@ -23,9 +23,9 @@ Companion docs: **[DESIGN.md](DESIGN.md)** (the *why*), **[RUNBOOK.md](RUNBOOK.m
 | `src/tokenizer/` | `char.ts` (char-level vocab, travels inside the checkpoint) |
 | `src/io/` | `checkpoint.ts` — the `bity1` format: `serialize`/`deserialize`, f32 + per-row int8 |
 | `src/data/` | `dataset.ts` (training data pipeline, session-granularity shuffle) |
-| `src/infer/` | shipped inference: `session.ts`, `sampler.ts`, `shell.ts`, `binaries.ts` (per-command manifests, the `reboot`/`sudo` theater) |
+| `src/infer/` | shipped inference: `session.ts`, `sampler.ts`, `shell.ts` (hybrid routing: scripted → programmatic core → model), `binaries.ts` (dreamed-command manifests, the `reboot`/`sudo` theater). **Programmatic core** (deterministic commands run as real code, not dreamed): `vfs.ts` (in-memory FS), `coreutils.ts` (~35 binaries + `DREAMED` set), `shell-exec.ts` (mini-shell: pipes/redirects/`&&`/globs/`$VAR`, routes core-vs-model) |
 | `corpus/generators/` | synthetic generators: `fs.mjs` (nested-path fs + metadata), `sys.mjs`, `net.mjs`, `git.mjs`, `fun.mjs`, `copy.mjs`, `lib.mjs`, `index.mjs` |
-| `corpus/capture/` | real-data capture: Debian container (`run.mjs`), Lima/QEMU VM (`vm/`), dmesg ingest |
+| `corpus/capture/` | real-data capture: Debian container (`run.mjs`, exhaustive `--help`/`man` harvest **as both guest + root**), Lima/QEMU VM (`vm/`), dmesg ingest |
 | `corpus/build.mjs` | assembles `corpus/data/bity.corpus.txt` (~68% synthetic + ~32% real) |
 | `corpus/COVERAGE_SPEC.md` | the coverage audit spec (drove corpus v8) |
 | `corpus/data/` | committed captures (`*.jsonl`, `*.corpus.txt`); built `bity.corpus.txt` is gitignored |
@@ -46,13 +46,18 @@ Companion docs: **[DESIGN.md](DESIGN.md)** (the *why*), **[RUNBOOK.md](RUNBOOK.m
    the browser loads the same `bity1` unchanged. Any change to `src/io/checkpoint.ts`
    or the header schema must keep old checkpoints loadable and stay parity-verified.
 
-2. **Corpus referential consistency is paramount.** A *wrong/contradictory* corpus
-   addition (e.g. `cat` returning content a prior `rm` deleted, or an inconsistent IP
-   for a host) is **worse than a missing one** — it teaches the model a falsehood.
-   Use random filenames/content (memorization impossible) and append-order listings.
-   Behavioral ceilings here are almost always **data coverage, not capacity**
-   ("the model learns what the data forces, not what it permits" — multi-word copy
-   survived a 2.4x scale-up to 25M then fell to a *data* fix at 10.7M).
+2. **Corpus referential consistency is paramount** — *for what the model still dreams.*
+   A *wrong/contradictory* corpus addition (e.g. an inconsistent IP for a host) is
+   **worse than a missing one** — it teaches the model a falsehood. The classic
+   stateful-FS example (`cat` returning content a prior `rm` deleted) is now moot:
+   deterministic FS/text/identity commands run against the **programmatic core**
+   (`src/infer/vfs.ts` + `coreutils.ts` + `shell-exec.ts`), not the model — so they're
+   always consistent by construction and need *zero* corpus. The corpus now only
+   trains the **dreamed** set (`git`/`ping`/`ps`/`man`/fun/unknown); keep those
+   referentially clean. Behavioral ceilings for dreamed commands are almost always
+   **data coverage, not capacity** ("the model learns what the data forces, not what
+   it permits" — multi-word copy survived a 2.4x scale-up to 25M then fell to a *data*
+   fix at 10.7M).
 
 3. **Order of trust: grad-check → overfit-one-batch → parity** (DESIGN §19).
    If a grad-check fails, nothing downstream is meaningful; then confirm the model

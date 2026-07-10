@@ -108,7 +108,7 @@ async function main(): Promise<void> {
 
   const shell = new Shell(session, { prompt: PROMPT });
   shell.register(...BINARIES);
-  const commandNames = [...shell.registry.keys()].sort();
+  const commandNames = shell.commandNames(); // core + dreamed + registered
   const history = new History();
 
   let line = "";

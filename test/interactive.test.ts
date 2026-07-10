@@ -89,17 +89,18 @@ function countingIO(): { io: ShellIO; delays: number[]; screen: () => string } {
 test("Shell.tempOverride: knob overrides per-binary temperature; STOCK restores it", async () => {
   const { session, seen } = fakeSession("ok\n");
   const shell = new Shell(session, { prompt: "$ ", seed: 1 });
-  shell.register({ name: "ls", kind: "model", sampling: { temperature: 0.55, topK: 30 } });
+  // a dreamed (non-core) command actually consults the model
+  shell.register({ name: "ping", kind: "model", sampling: { temperature: 0.55, topK: 30 } });
 
-  await shell.run("ls", countingIO().io);
+  await shell.run("ping x", countingIO().io);
   assert.equal(seen[0].temperature, 0.55); // stock: per-binary
 
   shell.tempOverride = 1.15; // FEVER
-  await shell.run("ls", countingIO().io);
+  await shell.run("ping x", countingIO().io);
   assert.equal(seen[1].temperature, 1.15);
 
   shell.tempOverride = null; // back to STOCK
-  await shell.run("ls", countingIO().io);
+  await shell.run("ping x", countingIO().io);
   assert.equal(seen[2].temperature, 0.55);
 });
 
@@ -132,34 +133,37 @@ test("Shell.pacingMode: turbo strips all delays, slow forces ~1200 baud", async 
   assert.ok(c.delays.includes(8), "slow forces 8ms char delay");
 });
 
-test("Shell with fake session: output reaches the screen, prompt stripped", async () => {
+test("Shell with fake session: dreamed output reaches the screen, prompt stripped", async () => {
   const { session } = fakeSession("total 4\nnotes.txt\n$ ");
   const shell = new Shell(session, { prompt: "$ ", seed: 1 });
   const { io, screen } = countingIO();
-  await shell.run("ls", io);
+  await shell.run("ping x", io); // dreamed command → streams from the model
   assert.ok(screen().includes("notes.txt"));
   assert.ok(!screen().includes("$ "), "the model's own prompt must never display");
 });
 
-test("Shell cd builtin: location-aware prompt, pure string navigation", async () => {
+test("Shell cd builtin: VFS-validated navigation, location-aware prompt", async () => {
   const { session } = fakeSession("x\n");
   const shell = new Shell(session, { prompt: "guest@bity:~$ ", seed: 1 });
-  const { io } = countingIO();
+  const io = () => countingIO().io;
 
   assert.equal(shell.prompt, "guest@bity:~$ ");
-  await shell.run("cd projects", io);
+  await shell.run("cd projects", io());            // real seeded dir
   assert.equal(shell.prompt, "guest@bity:~/projects$ ");
-  await shell.run("cd src", io);
-  assert.equal(shell.prompt, "guest@bity:~/projects/src$ ");
-  await shell.run("cd ..", io);
+  await shell.run("cd ..", io());
+  assert.equal(shell.prompt, "guest@bity:~$ ");
+  await shell.run("cd .config", io());             // real (dotfile) dir
+  assert.equal(shell.prompt, "guest@bity:~/.config$ ");
+  await shell.run("cd", io());                      // bare cd → home
+  assert.equal(shell.prompt, "guest@bity:~$ ");
+  await shell.run("cd /home/guest/projects", io()); // absolute path
   assert.equal(shell.prompt, "guest@bity:~/projects$ ");
-  await shell.run("cd", io);
-  assert.equal(shell.prompt, "guest@bity:~$ ");
-  await shell.run("cd /home/guest/pod", io);
-  assert.equal(shell.prompt, "guest@bity:~/pod$ ");
-  await shell.run("cd ..", io);
-  await shell.run("cd ..", io); // at home already: stays home
-  assert.equal(shell.prompt, "guest@bity:~$ ");
+
+  // cd into a missing dir fails like real bash: prompt unchanged, error shown
+  const { io: eio, screen } = countingIO();
+  await shell.run("cd nope", eio);
+  assert.equal(shell.prompt, "guest@bity:~/projects$ ", "a failed cd does not move");
+  assert.match(screen(), /No such file or directory/);
 });
 
 test("Shell static prompt stays static (cd still navigates silently)", async () => {
@@ -192,20 +196,20 @@ function stoppingSession(reply: string): SessionLike {
   };
 }
 
-test("cat-after-cd stops at the next prompt even when the model dreams a different path", async () => {
+test("dreamed command after cd stops at the next prompt even when the model dreams a different path", async () => {
   // in ~/projects the real prompt is guest@bity:~/projects$, but the model emits
   // the far-more-common HOME prompt after the output — the exact-prompt stop
   // would miss it and overrun into the extra hallucinated commands.
-  const reply = "README.md  src\nguest@bity:~$ ls\nnotes.txt\nguest@bity:~$ ";
+  const reply = "commit a1b2c3  fix\nguest@bity:~$ ls\nnotes.txt\nguest@bity:~$ ";
   const shell = new Shell(stoppingSession(reply), { prompt: "guest@bity:~$ ", seed: 1 });
-  shell.register({ name: "cat", kind: "model" });
+  shell.register({ name: "git", kind: "model" });
 
-  await shell.run("cd projects", countingIO().io);
+  await shell.run("cd projects", countingIO().io); // real seeded dir
   assert.equal(shell.prompt, "guest@bity:~/projects$ ");
 
   const { io, screen } = countingIO();
-  await shell.run("cat README.md", io);
-  assert.ok(screen().includes("README.md  src"), "shows the actual command output");
+  await shell.run("git log", io); // dreamed → streams from the model
+  assert.ok(screen().includes("commit a1b2c3  fix"), "shows the actual command output");
   assert.ok(!screen().includes("notes.txt"), "must NOT run the model's extra hallucinated commands");
   assert.ok(!screen().includes("guest@bity:"), "must not leak any prompt text");
 });
