@@ -24,9 +24,9 @@ Companion docs: **[DESIGN.md](DESIGN.md)** (the *why*), **[RUNBOOK.md](RUNBOOK.m
 | `src/io/` | `checkpoint.ts` — the `bity1` format: `serialize`/`deserialize`, f32 + per-row int8 |
 | `src/data/` | `dataset.ts` (training data pipeline, session-granularity shuffle) |
 | `src/infer/` | shipped inference: `session.ts`, `sampler.ts`, `shell.ts` (hybrid routing: scripted → programmatic core → model), `binaries.ts` (dreamed-command manifests, the `reboot`/`sudo` theater). **Programmatic core** (deterministic commands run as real code, not dreamed): `vfs.ts` (in-memory FS), `coreutils.ts` (~35 binaries + `DREAMED` set), `shell-exec.ts` (mini-shell: pipes/redirects/`&&`/globs/`$VAR`, routes core-vs-model) |
-| `corpus/generators/` | synthetic generators: `fs.mjs` (nested-path fs + metadata), `sys.mjs`, `net.mjs`, `git.mjs`, `fun.mjs`, `copy.mjs`, `lib.mjs`, `index.mjs` |
+| `corpus/generators/` | synthetic generators — **only the dreamed families are wired in** (`index.mjs`): `net.mjs`, `git.mjs`, `fun.mjs`, `unknown.mjs` (graceful `command not found`). `fs.mjs`/`sys.mjs`/`copy.mjs` are **retired** (the programmatic CORE owns FS/text/identity now) — kept in-tree as reference but unimported. `lib.mjs` = shared helpers |
 | `corpus/capture/` | real-data capture: Debian container (`run.mjs`, exhaustive `--help`/`man` harvest **as both guest + root**), Lima/QEMU VM (`vm/`), dmesg ingest |
-| `corpus/build.mjs` | assembles `corpus/data/bity.corpus.txt` (~68% synthetic + ~32% real) |
+| `corpus/build.mjs` | v3 (hybrid): assembles `corpus/data/bity.corpus.txt` (~68% real / ~32% synthetic). **Filters CORE-command records out of the real capture** (the model never dreams `ls`/`cat`/…) |
 | `corpus/COVERAGE_SPEC.md` | the coverage audit spec (drove corpus v8) |
 | `corpus/data/` | committed captures (`*.jsonl`, `*.corpus.txt`); built `bity.corpus.txt` is gitignored |
 | `train/mlx_train.py` | **optional** Apple MLX/Metal fast-path trainer (Python; lives in `.venv`) |
