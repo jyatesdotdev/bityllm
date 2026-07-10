@@ -410,6 +410,18 @@ A short list — and each has a clear analog in other domains:
 | **Autoregressive temperature/top-k sampling** | `infer/sampler.ts` | A classifier `argmax`es once — no feedback loop. Diffusion also generates iteratively, but over a fixed denoising schedule on continuous latents, not categorical draws fed back as input. |
 | **Pre-norm block + tied head** | `gpt.ts` | Residual connections and normalization are **universal** (ResNet skips predate transformers; BatchNorm/GroupNorm are the CNN norm analogs). Only the exact ordering and the embedding↔output *tie* are LM conventions. |
 
+> **Put those five together and you have an _autoregressive transformer_ — which is
+> exactly what bityllm _is_** (not a generalization target; the home base). That recipe
+> isn't text-specific: point the **same model** at any sequence of discrete tokens and
+> only the *tokenizer + corpus* change — code, symbolic music (MIDI events), DNA/protein
+> sequences, board-game moves, or even images pixel-by-pixel (ImageGPT-style, treating
+> pixels/VQ codes as a 1-D sequence — notably needs **no conv op**, unlike a
+> *convolutional* image model). Keep two axes separate: **"autoregressive" ⊥
+> "transformer."** Autoregressive *non*-transformers exist (RNN/LSTM, WaveNet's causal
+> convolutions, PixelRNN); *non*-autoregressive transformers exist (BERT, ViT, diffusion
+> transformers). It's the **causal mask + next-token loop** that make *this* transformer
+> autoregressive — drop the mask and you're in encoder/ViT territory.
+
 ### 13c. Could this codebase train other model families?
 
 Concretely, what you'd swap — and where reality bites:
