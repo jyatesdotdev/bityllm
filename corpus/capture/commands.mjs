@@ -130,7 +130,7 @@ export const isTextPath = (p) =>
 export const HARVEST = [
   {
     cat: "man",
-    limit: 700,
+    limit: 2500,
     query:
       "ls /usr/share/man/man1 /usr/share/man/man5 /usr/share/man/man7 /usr/share/man/man8 2>/dev/null " +
       "| sed -E 's/\\.[0-9].*$//' | sort -u",
@@ -138,7 +138,7 @@ export const HARVEST = [
   },
   {
     cat: "help",
-    limit: 450,
+    limit: 3000,
     query: "ls /usr/bin /bin /usr/sbin /sbin 2>/dev/null | sort -u",
     make: (bin) =>
       NAME_OK.test(bin) && !HELP_BLACKLIST.has(bin)
@@ -147,7 +147,7 @@ export const HARVEST = [
   },
   {
     cat: "pkg",
-    limit: 400,
+    limit: 1500,
     query: "dpkg-query -W -f='${Package}\\n' 2>/dev/null | sort -u",
     make: (p) =>
       NAME_OK.test(p) ? [`apt-cache show ${p} 2>/dev/null`, `dpkg -L ${p} 2>/dev/null | head -n 40`] : [],

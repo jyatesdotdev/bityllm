@@ -128,39 +128,52 @@ function buildPlan() {
   return [...curated, ...interleaved];
 }
 
-// ---- capture loop -----------------------------------------------------------
+// Personas to capture under: the unprivileged guest (primary) and root — so
+// permission-denied differences, sudo, and root-only tools are real, not dreamed.
+const USERS = [
+  { user: "guest", home: "/home/guest", prompt: PERSONA.prompt, share: 0.62 },
+  { user: "root", home: "/root", prompt: "root@bity:~# ", share: 0.38 },
+];
+
+// ---- capture loop (multi-user) ----------------------------------------------
 function capture(plan) {
   const records = [];
   let txt = "";
   let bytes = 0;
   const byCat = {};
+  const byUser = {};
   let dropped = 0;
   let skippedTxt = 0;
 
-  for (let i = 0; i < plan.length && bytes < TARGET; i += BATCH) {
-    const chunk = plan.slice(i, i + BATCH);
-    const results = runBatch(CONTAINER, chunk.map((c) => c.cmd), TIMEOUT);
-    const catByCmd = new Map(chunk.map((c) => [c.cmd, c.cat]));
+  for (const persona of USERS) {
+    const budget = Math.min(TARGET, bytes + Math.round(TARGET * persona.share));
+    log(`capturing as ${persona.user} (up to ${kb(budget)}) ...`);
+    for (let i = 0; i < plan.length && bytes < budget; i += BATCH) {
+      const chunk = plan.slice(i, i + BATCH);
+      const results = runBatch(CONTAINER, chunk.map((c) => c.cmd), TIMEOUT, persona.user, persona.home);
+      const catByCmd = new Map(chunk.map((c) => [c.cmd, c.cat]));
 
-    let added = 0;
-    for (const r of results) {
-      if (isBinaryish(r.output)) { dropped++; continue; }
-      const output = sanitize(r.output);
-      const cat = catByCmd.get(r.cmd) ?? "misc";
-      records.push({ system: IMAGE, cat, cmd: r.cmd, exit: r.exit, output }); // JSONL stays faithful
-      if (nonAsciiRatio(output) > 0.06) { skippedTxt++; continue; } // drop exotic charset tables from training text
-      const clean = normalizeAscii(output);
-      const block = PERSONA.prompt + r.cmd + "\n" + (clean.endsWith("\n") || clean === "" ? clean : clean + "\n");
-      txt += block;
-      bytes += Buffer.byteLength(block);
-      byCat[cat] = (byCat[cat] ?? 0) + 1;
-      added++;
-      if (bytes >= TARGET) break;
+      let added = 0;
+      for (const r of results) {
+        if (isBinaryish(r.output)) { dropped++; continue; }
+        const output = sanitize(r.output);
+        const cat = catByCmd.get(r.cmd) ?? "misc";
+        records.push({ system: IMAGE, user: persona.user, cat, cmd: r.cmd, exit: r.exit, output }); // JSONL stays faithful
+        if (nonAsciiRatio(output) > 0.06) { skippedTxt++; continue; } // drop exotic charset tables from training text
+        const clean = normalizeAscii(output);
+        const block = persona.prompt + r.cmd + "\n" + (clean.endsWith("\n") || clean === "" ? clean : clean + "\n");
+        txt += block;
+        bytes += Buffer.byteLength(block);
+        byCat[cat] = (byCat[cat] ?? 0) + 1;
+        byUser[persona.user] = (byUser[persona.user] ?? 0) + 1;
+        added++;
+        if (bytes >= budget) break;
+      }
+      log(`  [${persona.user}] batch ${i / BATCH + 1}: +${added} records, ${kb(bytes)} / ${kb(TARGET)}`);
     }
-    log(`batch ${i / BATCH + 1}: +${added} records, ${kb(bytes)} / ${kb(TARGET)}`);
   }
 
-  return { records, txt, bytes, byCat, dropped, skippedTxt };
+  return { records, txt, bytes, byCat, byUser, dropped, skippedTxt };
 }
 
 // ---- main -------------------------------------------------------------------
@@ -169,7 +182,7 @@ log("building command plan ...");
 const plan = buildPlan();
 log(`plan: ${plan.length} unique commands. capturing up to ${kb(TARGET)} ...`);
 
-const { records, txt, bytes, byCat, dropped, skippedTxt } = capture(plan);
+const { records, txt, bytes, byCat, byUser, dropped, skippedTxt } = capture(plan);
 const txtRecords = Object.values(byCat).reduce((a, b) => a + b, 0);
 
 mkdirSync(OUT_DIR, { recursive: true });
@@ -183,6 +196,7 @@ console.log(`jsonl records: ${records.length}  (dropped ${dropped} binary/garbag
 console.log(`train records: ${txtRecords}  (excluded ${skippedTxt} exotic-charset from .txt)`);
 console.log(`corpus size  : ${(bytes / 1024 / 1024).toFixed(2)} MB`);
 console.log(`by category  : ${Object.entries(byCat).map(([k, v]) => `${k}=${v}`).join("  ")}`);
+console.log(`by user      : ${Object.entries(byUser).map(([k, v]) => `${k}=${v}`).join("  ")}`);
 console.log(`vocab (chars): ${new Set(txt).size}`);
 console.log(`jsonl        : ${jsonlPath}`);
 console.log(`corpus       : ${txtPath}`);

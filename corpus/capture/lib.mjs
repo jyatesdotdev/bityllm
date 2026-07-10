@@ -52,7 +52,7 @@ export const RUNNER = [
   "export TERM=dumb PAGER=cat MANPAGER=cat GIT_PAGER=cat SYSTEMD_PAGER=cat",
   "export MANWIDTH=80 COLUMNS=80 LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive",
   'export PATH="$PATH:/usr/games:/usr/local/games:/sbin:/usr/sbin"',
-  "cd /home/guest 2>/dev/null || cd /",
+  'cd "${BITY_HOME:-/home/guest}" 2>/dev/null || cd /',
   "RS=$'\\036'",
   "i=0",
   "while IFS= read -r cmd; do",
@@ -65,11 +65,11 @@ export const RUNNER = [
   "",
 ].join("\n");
 
-// Run one batch of commands; returns [{ cmd, output, exit }].
-export function runBatch(container, cmds, timeoutSec) {
+// Run one batch of commands as `user` (default guest); returns [{ cmd, output, exit }].
+export function runBatch(container, cmds, timeoutSec, user = "guest", home = "/home/guest") {
   writeContainerFile(container, "/tmp/bity/cmds.txt", cmds.join("\n") + "\n");
   const args = [
-    "exec", "-e", `BITY_TIMEOUT=${timeoutSec}`, "-u", "guest", "-w", "/home/guest",
+    "exec", "-e", `BITY_TIMEOUT=${timeoutSec}`, "-e", `BITY_HOME=${home}`, "-u", user, "-w", home,
     container, "bash", "/tmp/bity/runner.sh",
   ];
   const raw = dockerCapture(args).stdout;
